@@ -1,0 +1,213 @@
+---
+title: "correspondance analysis"
+author: "James Stanfield"
+date: "5/25/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+from https://www.displayr.com/math-correspondence-analysis/
+
+relationship between thoroughness of newspaper readership by education level
+
+```{r}
+N = matrix(c(5, 18, 19, 12, 3, 7, 46, 29, 40, 7, 2, 20, 39, 49, 16), 
+ nrow = 5,
+ 
+ dimnames = list(
+ "Level of education" = c("Some primary", "Primary completed", "Some secondary", "Secondary completed", "Some tertiary"),
+ "Category of readership" = c("Glance", "Fairly thorough", "Very thorough")))  
+
+N
+
+```
+
+The first step in correspondence analysis is to sum up all the values in the table. I've called this total n.
+
+```{r}
+n = sum(N)
+```
+
+Then, we compute the table of proportions, P
+
+```{r}
+P = N / n
+P
+```
+
+In the language of correspondence analysis, the sums of the rows and columns of the table of proportions are called masses. These are the inputs to lots of different calculations. 
+
+The column masses in this example show that Glance, Fairly thorough, and Very thorough describe the reading habits of 18.3%, 41.3%, and 40.4% of the sample respectively. We can compute the column masses using the following R code:
+
+```{r}
+column.masses = colSums(P)
+column.masses
+```
+
+The row masses are Some primary (4.5%), Primary completed (26.9%), Some secondary (27.9%), Secondary completed (32.4%), and Some tertiary (8.3%). These are computed using:
+
+```{r}
+row.masses = rowSums(P)
+row.masses
+```
+
+Referring back to the original table of proportions, 1.6% of people glanced and had some primary education. Is this number big or small? 
+We can compute the value that we would expect to see under the assumption that there is no relationship between education and readership. The proportion that glances at a newspaper is 18.2% and 4.5% have only Some primary education. Thus, if there is no relationship between education and readership, we would expect that 4.5% of 18.2% of people (i.e., 0.008 = 0.8%) have both glanced and have primary education. We can compute the expected proportions of all the cells in the table in the same way.
+
+The following R code computes all the values in a single line of code, where %o% means that a table is created by multiplying each of the row totals (row masses) by each of the column totals.
+
+```{r}
+E = row.masses %o% column.masses
+E
+```
+
+
+We compute the residuals by subtracting the expected proportions from the observed proportions. Residuals in correspondence analysis have a different role to that which is typical in statistics. Typically in statistics, the residuals quantify the extent of error in a model. In correspondence analysis, by contrast, the whole focus is on examining the residuals.
+
+The residuals quantify the difference between the observed data and the data we would expect under the assumption that there is no relationship between the row and column categories of the table (i.e., education and readership, in our example).
+
+```{r}
+R = P - E
+R
+```
+
+Take a look at the top row of the residuals shown in the table above. All of the numbers are close to 0. The obvious explanation for this - that having some primary education is unrelated to reading behavior -  is not correct. The real explanation is all the observed proportions (P) and the expected proportions (E) are small because only 4.6% of the sample had this level of education. This highlights a problem with looking at residuals from a table. By ignoring the number of people in each of the rows and columns, we end up being most likely to find results only in rows and columns with larger totals (masses). We can solve this problem by dividing the residuals by the expected values, which gives us a table of indexed residuals (I).
+
+```{r}
+I = R / E
+I
+```
+
+The indexed residuals have a straightforward interpretation. The further the value from the table, the larger the observed proportion relative to the expected proportion. We can now see a clear pattern. The biggest value on the table is the .95 for Some primary and Glance. This tells us that people with some primary education are almost twice as likely to Glance at a newspaper as we would expect if there were no relationship between education and reading. In other words, the observed value is 95% higher than the expected value. Reading along this first row, we see that there is a weaker, but positive, indexed residual of 0.21 for Fairly thorough and Some primary. This tells us that people with some primary education were 21% more likely to be fairly thorough readers that we would expect. And, a score of -.65 for Very thorough, tells us that people with Some primary education were 65% less likely to be Very thorough readers than expected. Reading through all the numbers on the table, the overall pattern is that higher levels of education equate to a more thorough readership.
+
+As we will see later, correspondence analysis is a technique designed for visualizing these indexed values.
+
+
+
+The first step in computing the coordinates is to do a near-magical bit of mathematics called a Singular Value Decomposition (SVD). I have had a go at expressing this in layperson's language in my post An Intuitive Explanation of the Singular Value Decomposition (SVD): A Tutorial in R,
+https://www.displayr.com/singular-value-decomposition-in-r/
+which works through the same example that I have used in this post.
+
+
+The code that I used for performing the SVD of the indexed residuals is shown below. The first line computes Z, by multiplying together each of indexed residuals by the square root of their corresponding expected values. This seems a bit mysterious at first, but two interesting things are going on here.
+
+First, Z is a standardized residual, which is a rather cool type of statistic in its own right. Second, and more importantly from the perspective of correspondence analysis, what this does is cause the singular value decomposition to be weighted, such that cells with a higher expected value are given a higher weight in the data. As often the expected values are related to the sample size, this weighting means that smaller cells on the table, for which the sampling error will be larger, are down-weighted. In other words, this weighting makes correspondence analysis relatively robust to outliers caused by sampling error, when the table being analyzed is a contingency table.
+
+```{r}
+Z = I * sqrt(E)
+SVD = svd(Z)
+rownames(SVD$u) = rownames(P)
+rownames(SVD$v) = colnames(P)
+SVD
+```
+
+A singular value decomposition has three outputs:
+
+A vector, d, contains the singular values.
+A matrix, u, which contains the left singular vectors.
+A matrix, v, with the right singular vectors.
+
+The left singular vectors correspond to the categories in the rows of the table and the right singular vectors correspond to the columns. Each of the singular values, and the corresponding vectors (i.e., columns of u and v), correspond to a dimension. As we will see, the coordinates used to plot row and column categories are derived from the first two dimensions.
+
+Squared singular values are known as eigenvalues. The eigenvalues in our example are .0704, .0129, and .0000.
+
+```{r}
+eigenvalues = SVD$d^2
+eigenvalues
+```
+
+Each of these eigenvalues is proportional to the amount of variance explained by the columns. By summing them up and expressing them as a proportion, which is done by the R function prop.table(eigenvalues), we compute that the first dimension of our correspondence analysis explains 84.5% of the variance in the data and the second 15.5%, which are the numbers shown in x and y labels of the scatter plot shown earlier. The third dimension explains 0.0% of the variance, so we can ignore it entirely. This is why we are able to perfectly reconstitute the indexed residuals from the correspondence analysis plot.
+
+```{r}
+prop.table(eigenvalues)
+```
+
+As mentioned, we have weighted the indexed residuals prior to performing the SVD. So, in order to get coordinates that represent the indexed residuals we now need to unweight the SVD's outputs. We do this by dividing each row of the left singular vectors by the square root of the row masses (defined near the beginning of this post):
+
+```{r}
+standard.coordinates.rows = sweep(SVD$u, 1, sqrt(row.masses), "/")
+standard.coordinates.rows
+```
+
+We do the same process for the right singular vectors, except we use the column masses:
+
+```{r}
+standard.coordinates.columns = sweep(SVD$v, 1, sqrt(column.masses), "/")
+standard.coordinates.columns
+```
+
+The principal coordinates are the standard coordinates multiplied by the corresponding singular values:
+
+The positions of the row categories shown on the earlier plots are these principal coordinates. The principal coordinates for the education levels (rows) are shown in the table below.
+
+```{r}
+principal.coordinates.rows = sweep(standard.coordinates.rows, 2, SVD$d, "*")
+principal.coordinates.rows
+```
+
+The principal coordinates represent the distance between the row profiles of the original table. The row profiles are shown in the table below. They are the raw data (N) divided by the row totals. Outside of correspondence analysis, they are more commonly referred to as the row percentages of the contingency table. The more similar two rows' principal coordinates, the more similar their row profiles. More precisely, when we plot the principal coordinates, the distances between the points are chi-square distances. These are the distances between the rows weighted based on the column masses.
+
+The principal coordinates for the columns are computed in the same way:
+
+```{r}
+principal.coordinates.columns = sweep(standard.coordinates.columns, 2, SVD$d, "*")
+principal.coordinates.columns
+```
+
+In the row principal plot shown earlier, the row categories' positions are the principal coordinates. The column categories are plotted based on the standard coordinates. This means that it is valid to compare row categories based on their proximity to each other. It is also valid to understand the relationship between the row and column coordinates based on their dot products. But, it is not valid to compare the column points based on their position. I discuss this in more detail in a post called Normalization and the Scaling Problem in Correspondence Analysis: A Tutorial Using R.
+https://www.displayr.com/normalization-correspondence-analysis/
+
+
+We have already looked at one metric of the quality of a correspondence analysis: the proportion of the variance explained. We can also compute the quality of the correspondence analysis for each of the points on a map. Recall that the further a point is from the origin, the greater that point is explained by the correspondence analysis. When we square the principal coordinates and express these as row proportions, we get measures of the quality of each dimension for each point. Sometimes these are referred to as the squared correlations and squared cosines.
+
+The quality of the map for a particular category is usually defined as the sum of the scores it gets for the two dimensions that are plotted. In our example, these all add up to 100%.
+
+```{r}
+pc = rbind(principal.coordinates.rows, principal.coordinates.columns) 
+prop.table(pc ^ 2, 1)
+```
+
+
+
+
+
+Acknowledgments
+The data in the example comes from Greenacre and Hastie's 1987 paper "The geometric interpretation of correspondence analysis", published in the Journal of the American Statistical Association. 
+
+Where practical, I have used the notation and terminology used in Michael Greenacre's (2016) third edition of Correspondence Analysis in Practice. This excellent book contains many additional calculations for correspondence analysis diagnostics. The only intentional large deviation from Greenacre's terminology relates to the description of the normalizations (I discuss the differences in terminology in Normalization and the Scaling Problem in Correspondence Analysis: A Tutorial Using R). https://www.displayr.com/normalization-correspondence-analysis/
+
+This post is partly based on a paper that I wrote for the International Journal of Market Research, "Improving the display of correspondence analysis using moon plots", in 2011.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
