@@ -1,0 +1,1439 @@
+---
+title: "Borgatti_examples"
+author: "James Stanfield"
+date: "5/25/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## Preparation ####
+
+#
+# There are several other potentially useful packages, including:
+#   CINNA - 
+#   gplot -
+#   ggnetwork - ggplot-like plotting for networks
+#   graphlayouts - Some useful plotting stuff for igraph
+#   keyplayer - advanced centality methods
+#   multiplex - for multplex graphs
+#   ndtv - Network Dynamic Temporal Visualization
+#   qgraph
+#   RSiena - particularly useful for longitudinal networks; see Snijders' 
+#            Siena home page
+#   sand - from a more mathematical text
+#   tnet - miscellaneous advanced analyses
+#   vegan - Some useful network and clustering functions
+# They are mostly beyond the scope of this course, however, and so are not
+#  included here.
+
+{
+  c("alphahull",     # To calculate the convex hull
+    "ca",            # Correspondence analysis
+    "conflicted",    # To deal with conflicting function names
+    # I've had some strangeness with this
+    #  script. I suspect package:conflicted,
+    #  but I don't yet know for sure.
+    "data.table",    # Fast data input/output
+    "dplyr",         # This is all of tidyverse that gets used here
+    "dtplyr",        # dplyr syntax with a data.table backend
+    "here",          # To find/store files w/o setwd() and getwd()
+    "igraph",        # Basic network tools; we'll use statnet mostly
+    "igraphdata",    # Some useful datasets
+    "intergraph",    # Translate between igraph and statnet formats
+    "lmPerm",        # To do permutation tests
+    "statnet",      # A suite of network tools, including ERGM and more
+    #"xlsx",
+    "openxlsx"
+  ) -> package_names
+  
+  for (package_name in package_names) {
+    if (!is.element(package_name, installed.packages()[, 1])) {
+      install.packages(package_name,
+                       repos = "http://cran.mtu.edu/")
+      # An alternate, just in case.
+      #                      repos="http://lib.stat.cmu.edu/R/CRAN")
+    }
+    library(
+      package_name,
+      character.only = TRUE,
+      quietly = TRUE,
+      verbose = FALSE
+    )
+  }
+  rm(list = c("package_name", "package_names"))
+}
+
+set_here()
+
+# Because I like these options:
+options(show.signif.stars = FALSE)
+options(digits = 4)
+
+```
+
+```{r}
+read.ucinet.header <- function(filename) {
+  # function for reading UCINET header files (recent versions only)
+  # This only works for "single level" files. (In spreadsheet parlance, 
+  # each workbook can have only one sheet.)
+  UCINET.header <- file(paste(filename,".##h",sep=''),"rb")
+  ignore <- readBin(UCINET.header,what="int",size=1)
+  headerversion <- paste(
+    rawToChar(readBin(UCINET.header,what="raw",size=1)),
+    rawToChar(readBin(UCINET.header,what="raw",size=1)),
+    rawToChar(readBin(UCINET.header,what="raw",size=1)),
+    rawToChar(readBin(UCINET.header,what="raw",size=1)),
+    rawToChar(readBin(UCINET.header,what="raw",size=1)),
+    sep='')
+  if (!(headerversion %in% c('DATE:','V6404'))) {
+    close(UCINET.header)
+    stop(paste('unknown header type; try more recent UCINET file types'))
+  }
+  year <- 2000+readBin(UCINET.header,what="int",size=2)
+  month <- c('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug',
+             'Sep','Oct','Nov','Dec')[readBin(UCINET.header,what="int",size=2)]
+  day <- readBin(UCINET.header,what="int",size=2)
+  dow <- c('Monday','Tuesday','Wednesday','Thursday','Friday',
+           'Saturday','Sunday')[readBin(UCINET.header,what="int",size=2)]
+  labtype <- readBin(UCINET.header,what="int",size=2)
+  infile.dt <- c('nodt','bytedt','booleandt','shortintdt','worddt',
+                 'smallintdt','longintdt',' singledt','realdt','doubledt',
+                 'compdt','extendeddt','labeldt','setdt','stringdt','pointerdt',
+                 'chardt','integerdt','nodelistdt','sparsedt','int64dt')[
+                   readBin(UCINET.header,what="int",size=1)]
+  ndim <- readBin(UCINET.header,what="int",size=2)
+  if (headerversion=='V6404') {fct=2} else {fct=1}
+  dims <- c(readBin(UCINET.header,what="int",size=2*fct),
+            readBin(UCINET.header,what="int",size=2*fct))
+  if (ndim==3) {
+    dims[3] <- readBin(UCINET.header,what="int",size=2*fct)
+  }
+  if (!(ndim==2|ndim==3&dims[3]==1)) {
+    close(UCINET.header)
+    stop(paste('UCINET file with',dims[3],'levels; please convert separately'))
+  }
+  t.length <- readBin(UCINET.header,what="int",size=1)
+  if (t.length>0){
+    titl <- sapply(1:t.length, function(i){
+      rawToChar(readBin(UCINET.header,what="raw",size=1))
+    })
+    titl <- paste(titl,collapse='')
+  } else {titl <- ''}
+  haslab <- c(readBin(UCINET.header,what="logical",size=1),
+              readBin(UCINET.header,what="logical",size=1))
+  if (ndim==3) {
+    haslab[3] <- readBin(UCINET.header,what="logical",size=1)
+  }
+  dim.labels <- list()
+  for (arr.dim in 1:length(dims)) {
+    if (haslab[arr.dim]) {
+      dim.labels[[arr.dim]] <- rep(NA,dims[arr.dim])
+      for (i in 1:dims[arr.dim]) {
+        lab <- ''
+        lablen <- readBin(UCINET.header,what="int",size=2)
+        for (let in 1:lablen) {
+          lab <- paste(lab,
+                       rawToChar(readBin(UCINET.header,what="raw",size=1)),
+                       sep='')
+        }
+        dim.labels[[arr.dim]][i] <- lab
+      }
+    }}
+  close(UCINET.header)
+  if (ndim==3&dims[3]==1) {
+    titl <- dim.labels[[3]][1]
+    warning(paste('UCINET file with one level; level name "',
+                  titl,'" treated as network name',sep=''))
+    ndim <- 2
+    dims <- dims[1:2]
+    haslab <- haslab[1:2]
+    dim.labels <- dim.labels[1:2]
+  }
+  return(list(
+    headerversion=headerversion,
+    date=paste(dow,paste(day,month,year,sep='-')),
+    labtype=labtype,
+    infile.dt=infile.dt,
+    ndim=ndim,
+    dims=dims,
+    title=titl,
+    haslab=haslab,
+    dim.labels=dim.labels
+  ))
+}
+
+read.ucinet <- function(filename) {
+  # function for reading UCINET data files (recent versions only)
+  # filename = UCINET filename (without ## extension)
+  # begin of main function code:
+  header <- read.ucinet.header(filename)
+  UCINET.data <- file(paste(filename,".##d",sep=''),"rb")
+  thedata <- c()
+  for (i in 1:(header$dims[1]*header$dims[2]))
+    thedata[i] <- readBin(UCINET.data,what="numeric",size=4,endian='little')
+  close(UCINET.data)
+  mat <- matrix(thedata,nr=header$dims[2],nc=header$dims[1],
+                dimnames=header$dim.labels[c(2,1)],byrow=TRUE)
+  # put additional info from header file on matrix
+  if (header$title!='') {attr(mat,'title') <- header$title}
+  attr(mat,'date') <- header$date
+  #attr(mat,'labtype') <- header$labtype
+  #attr(mat,'infile.dt') <- header$infile.dt
+  return(mat)
+}
+```
+
+# Chapter 1
+
+```{r}
+## Chapter 1 ####
+# No code
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Chapter 2
+
+```{r}
+# Figure 2.1
+network.initialize(n = 5,
+                   directed = TRUE) -> F2.1
+LETTERS[1:5] -> network.vertex.names(F2.1)
+network::add.edges(F2.1,
+                   #          tail = c("A", "B", "C", "D", "D"),
+                   tail = c(1, 2, 3, 4, 4),
+                   head = c(2, 3, 4, 5, 1))
+#          head = c("B", "C", "D", "A", "E"))
+
+# A Note about plotting:
+# Generic network plotting has a random aspect to it, so setting the seed
+#  helps to make it reproducible. There are a number of ways to layout the
+#  nodes on a network, and we'll look at some of those, but network plotting
+#  is still a bit of an art and a bit of luck.
+# Tcl/Tk can be used to set the position of nodes by hand, but OMG, what a
+#   pain!
+#
+# All that is the long explanation for why the plots here will not necessarily
+#  look exactly like those in the text.
+# 
+# More on plotting will happen in Chapter 7.
+
+set.seed(42)
+plot.network(F2.1,
+             label = network.vertex.names(F2.1),
+             arrowhead.cex = 2,
+             edge.lwd = 2,
+             vertex.col = 8,
+             vertex.cex = 3,
+             vertex.border = 0)
+```
+
+```{r}
+# The data, and descriptions of those data, for Figure 2.2 can be found at:
+#   http://vlado.fmf.uni-lj.si/pub/networks/data/ucinet/ucidata.htm#wiring
+# Getting these data into R is not as much fun as one might like. Welcome to
+#  the network version of data wrangling!
+
+# Figure 2.2 common data for (a) and (b). This is a common thing to have to do
+#  to get data in UCINET ("dat") format. Get the node names:
+fread("http://vlado.fmf.uni-lj.si/pub/networks/data/ucinet/wiring.dat",
+      skip = 4,               # Must look at the data structure to be sure
+      #  of this
+      header = FALSE,
+      nrows = 14)$V1 -> employees
+```
+
+```{r}
+# Figure 2.2(a)
+as.matrix(fread("http://vlado.fmf.uni-lj.si/pub/networks/data/ucinet/wiring.dat",
+                skip = 41,    # Must look at the data structure to be sure 
+                #  of this
+                nrows = 14)) -> games_mat
+employees -> rownames(games_mat) -> colnames(games_mat)
+network(games_mat, directed = FALSE) -> games_net
+
+set.seed(42)
+plot.network(games_net,
+             label = network.vertex.names(games_net),
+             edge.lwd = 2,
+             vertex.col = 8,
+             vertex.sides = 4,    # This doesn't round the corners of the
+             #   verices
+             vertex.cex = 3,
+             vertex.border = 1,
+             pad = 1)             # My plots clip labels otherwise
+```
+
+```{r}
+# Figure 2.2(b)
+as.matrix(fread("http://vlado.fmf.uni-lj.si/pub/networks/data/ucinet/wiring.dat",
+                skip = 55,    # Must look at the data structure to be sure 
+                #  of this
+                nrows = 14)) -> friends_mat
+employees -> rownames(friends_mat) -> colnames(friends_mat)
+network(friends_mat, directed = FALSE) -> friends_net
+
+set.seed(42)
+plot.network(friends_net,
+             label = network.vertex.names(friends_net),
+             edge.lwd = 2,
+             vertex.col = 8,
+             vertex.sides = 4,    # This doesn't round the corners of the
+             #  verices
+             vertex.cex = 3,
+             vertex.border = 1,
+             pad = 1)             # My plots clip labels otherwise
+
+```
+
+```{r}
+# Figure 2.3
+# Read these from the UCI data:
+read.ucinet.header(here("Data/campnet")) -> camp_hdr
+read.ucinet(here("Data/campnet")) -> camp_mat
+camp_hdr$dim.labels[[1]] -> rownames(camp_mat) -> colnames(camp_mat)
+network(camp_mat,
+        directed = TRUE) -> camp_net
+
+# Get and set the vertex attributes
+read.ucinet.header(here("Data/campsex")) -> camp_sex_hdr
+read.ucinet(here("Data/campsex")) -> camp_sex_mat
+# These got imported as a matrix:
+network::set.vertex.attribute(camp_net, "Sex", value = camp_sex_mat[,1]) 
+# These got imported as a matrix:
+network::set.vertex.attribute(camp_net, "Role", value = camp_sex_mat[,6])
+
+set.seed(42)
+plot.network(camp_net,
+             label = network.vertex.names(camp_net),
+             # Colors rather than shapes to distinguish roles:
+             vertex.col = network::get.vertex.attribute(camp_net, "Role") + 1)
+
+
+```
+
+```{r}
+# Figure 2.4
+# I think I've got the correct data set - the Sampson Monastery data. 
+#  However, one needs to be careful, as these data only have 18 of the full
+#  set of 25 members. Furthermore, there are 10 different networks of these
+#  18, depending upon which question is plotted. So, this may be way off.
+# The full data are in Data/sampson.RData.
+#
+fread("http://moreno.ss.uci.edu/sampson.dat",
+      skip = 4,               # Must look at the data structure to be
+      #  sure of this
+      header = FALSE,
+      nrows = 18)$V1 -> monks
+
+# Figure 2.2(a)
+as.matrix(fread("http://moreno.ss.uci.edu/sampson.dat",
+                skip = 53,    # Must look at the data structure to be sure
+                #  of this
+                nrows = 18)) -> monks_mat
+monks -> rownames(monks_mat) -> colnames(monks_mat)
+network(monks_mat, directed = TRUE) -> monks_net
+network::set.edge.value(monks_net, "Weight", monks_mat)
+
+set.seed(42)
+plot.network(monks_net,
+             label = network.vertex.names(monks_net),
+             edge.label = network::get.edge.attribute(monks_net, "Weight"),
+             pad = 1)
+```
+
+```{r}
+# Matrix 2.1
+friends_mat
+```
+
+```{r}
+# Matrix 2.2
+# Sadly, I don't think that statnet has a good way to do distances. So, I
+#  convert to igraph and work there.
+asIgraph(camp_net) -> camp_gr
+distances(camp_gr,
+          mode = "out") -> camp_dist
+V(camp_gr)$vertex.names -> rownames(camp_dist) -> colnames(camp_dist)
+camp_dist
+```
+
+```{r}
+# Matrix 2.3
+load("Data/DeepSouth.RData")
+as.matrix(davisDyn)
+```
+
+
+
+#
+#
+#
+#
+#
+#
+#
+
+
+
+
+
+## Chapter 3 ####
+
+```{r}
+# Figure 3.2
+matrix(data = c(0, 0, 0, 0, 0, 0, 0, 0,
+                0, 1, 1, 0, 0, 0, 0, 0,
+                0, 1, 0, 1, 0, 0, 0, 0,
+                0, 1, 1, 0, 1, 0, 0, 0,
+                0, 0, 0, 1, 0, 1, 0, 1,
+                0, 0, 0, 0, 1, 0, 1, 1,
+                0, 0, 0, 0, 0, 1, 0, 1,
+                0, 0, 0, 0, 1, 0, 1, 0),
+       nrow = 8,
+       ncol = 8,
+       byrow = TRUE) -> F3.2_mat
+network(F3.2_mat,
+        directed = FALSE) -> F3.2_net
+plot(F3.2_net,
+     label = network.vertex.names(F3.2_net),
+     vertex.col = 8,
+     vertex.sides = 4,
+     main = "Tie absent")
+sna::betweenness(F3.2_net,
+                 gmode = "graph",
+                 rescale = TRUE)
+
+add.edge(F3.2_net, tail = 3, head = 8) -> F3.2b_net
+plot(F3.2b_net,
+     label = network.vertex.names(F3.2b_net),
+     vertex.col = 8,
+     vertex.sides = 4,
+     main = "Tie present")
+# I believe that the table of Figure 3.2 is incorrect. Each of the values
+#  listed there are only 2/3 of the value they should be. Multiplying the next
+#  command by 2/3 yields the values in Figure 3.2. (They are incorrect in the
+#  figure because they do not sum to 1.0)
+sna::betweenness(F3.2b_net,
+                 gmode = "graph",
+                 rescale = TRUE)
+```
+
+## Chapter 4 ###
+
+# Figure 4.5
+# Yeah, I'm skipping this one because I don't know a quick way to get which
+#  subset of IMDB is being shown - the original web-site that maintained those
+#  data is defunct - and because I'm too lazy to put in 40 nodes and 96 edges
+#  by hand. We'll be back to stuff like this when we look at plotting networks.
+
+
+
+#
+#
+#
+#
+#
+#
+#
+
+
+
+## Chapter 5 ####
+# This is the chapter were UCINET really comes into play. Hence, there's a lot
+#  of stuff here. Essentially, this is the code to do everything that Borgatti
+#  et al. do in Chapter 5.
+
+# Matrix format
+
+# Figure 5.1
+# It's a MS Excel spreadsheet...you don't need me for this one.
+
+# Figure 5.2
+# UCINET specific; R uses a data frame for this
+
+```{r}
+# Figure 5.3 & Matrix 5.1
+list("Bill Smith" = c("Carrie Jones", "Doug Johnson", "Eric Morrison"),
+     "Eric Morrison" = "Finn Cobb",
+     "Doug Johnson" = c("Finn Cobb", "Eric Morrison"),
+     "Carrie Jones" = "Finn Cobb") -> nodelist
+
+# I'd bet that there's a good purrr way to do this, but I'm trying
+#  to write this script quickly, not elegantly.
+sort(c(names(nodelist), "Finn Cobb")) -> nodeNames
+matrix(0,
+       ncol = length(nodeNames),
+       nrow = length(nodeNames),
+       dimnames = list(nodeNames,
+                       nodeNames)) -> node_mat
+for(index in 1:length(nodelist)) {
+  for(col in nodelist[[index]]) {
+    1 -> node_mat[names(nodelist)[index], col]
+    1 -> node_mat[col, names(nodelist)[index]]
+  }
+}
+```
+
+```{r}
+# Figure 5.4
+# Let's do some igraph, just for a change
+graph_from_adjacency_matrix(node_mat,
+                            mode = "undirected") -> node_gr
+set.seed(42)
+# In the next, vertex.label.dist, vertex.label.degree, and
+#  vertex.size were set by trial and error. (I've done this
+#  before, so it didn't take many trials or much error.)
+plot(node_gr,
+     layout = layout_in_circle(node_gr),
+     vertex.label.dist = c(6, 7, 5, 7, 4),
+     vertex.shape = "csquare",
+     vertex.color = "gray",
+     vertex.size = 8,
+     vertex.label.degree = c(0, 0, -pi/6, pi, 3*pi/4))
+```
+
+# Figure 5.5
+# UCINET specific
+
+# Figure 5.6
+# UCINET specific
+
+```{r}
+# Figure 5.7
+# Edgelists (without attributes)
+matrix(c("Bill Smith", "Eric Morrison",
+         "Bill Smith", "Doug Johnson",
+         "Bill Smith", "Carrie Jones",
+         "Eric Morrison", "Bill Smith",
+         "Eric Morrison","Doug Johnson",
+         "Eric Morrison", "Finn Cobb",
+         "Doug Johnson", "Bill Smith",
+         "Doug Johnson", "Eric Morrison",
+         "Doug Johnson", "Finn Cobb",
+         "Carrie Jones", "Bill Smith",
+         "Carrie Jones", "Finn Cobb",
+         "Finn Cobb", "Eric Morrison",
+         "Finn Cobb", "Doug Johnson",
+         "Finn Cobb", "Carrie Jones"),
+       ncol = 2,
+       nrow = 14,
+       byrow = TRUE) -> F5.7_mat
+graph_from_edgelist(F5.7_mat,
+                    directed = FALSE) -> F5.7_gr
+
+
+```
+
+```{r}
+# Figure 5.8
+# Edgelists (with attributes)
+# I'm going to use a dataset that is similar to the one BEJ
+#  display. Where BEJ use "PADGB" for Padgett & Anselm Business,
+#  I'm using "Political"; "M" is for Marriage.
+#
+# This will require some cleaning up, as the edges may run both
+#  ways (as in the case of marriage and some political alliances)
+#  or not (as in some business/politics, such as loans). I'm not
+#  worrying about that here, though, as nothing simply handles 
+#  graphs with some directed and some not-directed.
+
+fread(file = here("Data/Florentine Edges.csv"),
+      header = TRUE) -> florentine_edges
+graph_from_data_frame(florentine_edges,
+                      directed = TRUE) 
+```
+
+#
+#
+#
+#
+#
+#
+#
+#
+#
+
+## Chapter 6 ####
+
+```{r}
+# Matrix 6.1
+matrix(c(0, 206, 429, 1504, 963, 2976, 3095, 2979, 1949,
+         206, 0, 233, 1308, 802, 2815, 2934, 2786, 1771,
+         419, 233, 0, 1075, 671, 2684, 2799, 2631, 1616,
+         1504, 1308, 1075, 0, 1329, 3273, 3053, 2687, 2037,
+         963, 802, 671, 1329, 0, 2013, 2142, 2054, 996,
+         2976, 2915, 2684, 3273, 2013, 0, 808, 1131, 1307,
+         3095, 2934, 2799, 3053, 2142, 808, 0, 379, 1235,
+         2979, 2786, 2631, 2687, 2054, 1131, 379, 0, 1059,
+         1949, 1771, 1816, 2037, 996, 1307, 1235, 1059, 0
+),
+nrow = 9,
+ncol = 9,
+byrow = TRUE) -> city_mat
+c("Boston", "NY", "DC", "Miami", "Chicago", "Seattle", "SF", "LA",
+  "Denver") -> citynames -> rownames(city_mat) -> colnames(city_mat)
+
+city_mat
+```
+
+```{r}
+# Figure 6.1
+# The "as.dist()" or "dist()" functions change the matrix
+#  into something that cmdscale() can work with
+as.dist(city_mat) -> city_dist
+
+fit <- cmdscale(city_dist, eig = TRUE, k = 2)
+x <- -fit$points[, 1]  # Otherwise, the plot is reversed
+y <- fit$points[, 2]   # This should be reversed, but isn't in
+#  the text
+
+{
+  plot(x, y, pch = 19, xlim = range(x) + c(0, 600))
+  text(x, y, pos = 4, labels = citynames)
+}
+```
+
+```{r}
+# Table 6.1 & Figure 6.2
+# The next works, with warnings
+read.ucinet.header("Data/doctorates") -> doc_hdr
+read.ucinet("Data/doctorates") -> doc_mat
+# A bit of clean-up; remove attributes
+NULL -> attr(doc_mat, "title")
+NULL -> attr(doc_mat, "date")
+doc_hdr$dim.labels[[2]] -> rownames(doc_mat)
+doc_hdr$dim.labels[[1]] -> colnames(doc_mat)
+doc_mat         # Table 6.1
+
+
+# Figure 6.2
+# This is upside down from BEJ.
+ca(doc_mat,
+   nd = 2) -> doctorates_ca
+plot(doctorates_ca) 
+```
+
+```{r}
+# Figure 6.3
+matrix(c("a", "b",
+         "a", "f",
+         "a", "d",
+         "b", "d",
+         "b", "e",
+         "b", "g",
+         "c", "d",
+         "c", "h",
+         "d", "g",
+         "d", "f",
+         "d", "e",
+         "e", "g",
+         "f", "g",
+         "f", "h",
+         "g", "h",
+         "h", "r",
+         "h", "i",
+         "i", "j",
+         "i", "n",
+         "i", "p",
+         "j", "k",
+         "j", "l",
+         "j", "m",
+         "j", "n",
+         "j", "p",
+         "j", "o",
+         "k", "l",
+         "k", "p",
+         "l", "m",
+         "m", "q",
+         "n", "o",
+         "q", "s"),
+       ncol = 2,
+       byrow = TRUE) -> F6.3_edges
+network(F6.3_edges, directed = FALSE) -> F6.3_net
+set.seed(42)
+plot.network(F6.3_net,
+             label = network.vertex.names(F6.3_net))
+```
+
+```{r}
+# Table 6.2
+# Late chapters will talk in more detail about centralities
+#  (It is this habit of forward references than made me assign
+#  the extra pre-course reading.) Note, also, that BEJ normalize
+#  their valued differently than others; hence the multiplications
+#  and divisions. (And still, we're off by a bit. I think the
+#  issue is some missing edges somewhere...the correspondence
+#  analysis will have some differences...oh, well!)
+as.data.frame(F6.3_edges) -> F6.3_edgelist
+sna::betweenness(F6.3_net) * 
+  nrow(F6.3_edgelist) / 100 -> F6.3_between
+100 * sna::closeness(F6.3_net) -> F6.3_close
+sna::degree(F6.3_net) -> F6.3_degree
+# I have no idea about the normalization on the next one, but
+#  141 is the correct number
+141 * sna::evcent(F6.3_net) -> F6.3_eigen
+```
+
+```{r}
+# Figure 6.3
+cbind(F6.3_degree, 
+      F6.3_close, 
+      F6.3_between, 
+      F6.3_eigen) -> F6.3_mat
+letters[1:19] -> rownames(F6.3_mat)
+c("Degree", "Closeness", "Betweenness", "Eigenvector") -> 
+  colnames(F6.3_mat)
+F6.3_mat
+```
+
+```{r}
+# Figure 6.4
+ca(F6.3_mat, nd = 2) -> F6.3_ca
+plot(F6.3_ca)
+
+# Here's one way to put this in a graph:
+data.frame("Name" = letters[1:19],
+           "Betweenness" = F6.3_between,
+           "Closeness" = F6.3_close,
+           "Degree" = F6.3_degree,
+           "Eigenvector" = F6.3_eigen,
+           row.names = NULL) -> F6.3_vert
+
+graph_from_data_frame(d = F6.3_edgelist,
+                      directed = FALSE,
+                      vertices = F6.3_vert) -> F6.3_gr
+```
+
+```{r}
+# Matrix 6.2 is simply city_mat above.
+city_mat
+```
+
+```{r}
+# Matrices 6.3, 6.4, 6.5 and 6.6 won't be redone here. However, here is the
+#  clustering output of Figure 6.5:
+
+hclust(city_dist, method="single") -> hc_single  # The BEJ way
+plot(hc_single)
+hc_single$height    # Read the dendogram from the bottom to see these in
+#  context.
+
+hc_single$labels
+hc_single$merge
+##      [,1] [,2]
+## [1,]   -1   -2   # Merge the first and second labels
+## [2,]   -3    1   # Merge the third label into the cluster created in step 1
+## [3,]   -7   -8   # Merge the 7th and 8th labels into a cluster
+## [4,]   -5    2   # Merge the 5th label into the cluster created in step 2
+## [5,]   -6    3   # Merge the 6th label into the cluster created in step 3
+## [6,]   -9    4   # Merge the 9th label into the cluster created in step 4
+## [7,]    5    6   # Merge the cluster created in step 5 into the cluster
+#  created in step 6
+## [8,]   -4    7   # Merge the 4th label into the cluster created in step 7
+
+# My preferred method, in general, if I don't know anything else:
+hclust(city_dist, method="average") -> hc_ave
+# Compare to plot(hc_single); Miami & Denver are better, no?:
+plot(hc_ave)
+hc_ave$height
+```
+
+
+
+
+
+
+
+
+
+
+
+
+# Chapter 7 #####
+
+```{r}
+# Figure 7.1
+# There is a random element, so I won't get exactly the same. And...I don't
+#  know where the I3 links, for example, come from in BEJ, as I don't see them
+#  in the games matrix. Also, I3 doesn't have any links in Figure 7.2 in BEJ.
+#  Maybe I3 is just unfortunately placed on a link, but isn't actually
+#  connected there. Anyway, I hope you get the idea.
+fread("http://vlado.fmf.uni-lj.si/pub/networks/data/ucinet/wiring.dat",
+      skip = 4,               # Must look at the data structure to be sure
+      #  of this
+      header = FALSE,
+      nrows = 14)$V1 -> employees
+as.matrix(fread("http://vlado.fmf.uni-lj.si/pub/networks/data/ucinet/wiring.dat",
+                skip = 41,    # Must look at the data structure to be sure of
+                #  this
+                nrows = 14)) -> games_mat
+employees -> rownames(games_mat) -> colnames(games_mat)
+network(games_mat, directed = FALSE) -> games_net
+
+set.seed(42)
+plot.network(games_net,
+             label = network.vertex.names(games_net),
+             mode = "fruchtermanreingold",
+             layout.par = list(niter = 1),         # Random start with no 
+             #  updating
+             edge.lwd = 2,
+             vertex.col = 8,
+             vertex.sides = 4,    # This doesn't round the corners of the 
+             #  vertices
+             vertex.cex = 3,
+             vertex.border = 1,
+             pad = 1)             # My plots clip labels otherwise
+```
+
+```{r}
+#Figure 7.2
+# This type of separation can also be accomplished through
+#  tcl/tk plotting, but (a) that is interactive (and so it
+#  WILL NOT KNIT) and (b) is is a major pain.
+set.seed(42)
+plot.network(games_net,
+             label = network.vertex.names(games_net),
+             mode = "fruchtermanreingold",           # Nodes "push"
+             #  each other away
+             layout.par = list(niter = 500),         # Random start with 500
+             #  iterations
+             edge.lwd = 2,
+             vertex.col = 8,
+             vertex.sides = 4,    # This doesn't round the corners of the 
+             #  verices
+             vertex.cex = 3,
+             vertex.border = 1,
+             pad = 1)             # My plots clip labels otherwise
+```
+
+```{r}
+# Figure 7.3
+fread(file = here("Data/Trade_minerals.csv"),
+      header = TRUE) -> trade_df
+trade_df[,-1] -> trade_df
+as.matrix(trade_df) -> trade_mat
+colnames(trade_df) -> rownames(trade_mat)
+network(trade_mat, directed = FALSE) -> trade_net
+
+fread(file = here("Data/Trade_Attribute.csv"),
+      header = TRUE) -> trade_attr_df
+trade_attr_df$SCHOOLS -> x
+trade_attr_df$ENERGY -> y
+# For some reason, I can't get the coord parameter in plot.network() to work
+#  properly. Hence, my work-around is to normalize the x & y variables
+x/max(x) -> x_norm
+y/max(y) -> y_norm
+
+
+plot.network(trade_net,
+             label = colnames(trade_mat),
+             coord = as.matrix(cbind(x_norm, y_norm)),
+             # The next line doesn't seem to work as I think it should, making the previous
+             #  line & work necessary:
+             #             coord = as.matrix(cbind(x, y)),
+             label.cex = 0.5)
+```
+
+```{r}
+# Figure 7.4
+as.dist(trade_mat) -> trade_dist
+
+fit <- cmdscale(trade_dist, eig = TRUE, k = 2)
+x <- -fit$points[, 1]  # Otherwise, the plot is reversed
+y <- fit$points[, 2]   # This should be reversed, but isn't in
+#  the text
+
+# BEJ obviously must have used different (I suspect additional) data than the
+#  data that were available on the book's web-site. Oh, well. I'm not going to
+#  investigate that problem right now; this is the correct process.
+plot.network(trade_net,
+             label = colnames(trade_mat),
+             coord = as.matrix(cbind(x, y)),
+             label.cex = 0.5)
+```
+
+```{r}
+# Figure 7.5
+set.seed(42)
+# There is some randomness in all this, so I won't reproduce Figure 7.5
+#  perfectly:
+plot.network(trade_net,
+             label = colnames(trade_mat),
+             label.cex = 0.5)
+```
+
+```{r}
+# Figure 7.6
+read.ucinet.header("Data/campnet") -> camp_hdr
+read.ucinet("Data/campnet") -> camp_mat
+camp_hdr$dim.labels[[1]] -> rownames(camp_mat) -> colnames(camp_mat)
+network(camp_mat,
+        directed = TRUE) -> camp_net
+
+# Get and set the vertex attributes
+read.ucinet.header("Data/campsex") -> camp_sex_hdr
+read.ucinet("Data/campsex") -> camp_sex_mat
+# The next two got imported as a matrix:
+network::set.vertex.attribute(camp_net, "Sex", value = camp_sex_mat[,1])  
+network::set.vertex.attribute(camp_net, "Betweenness", value = sna::betweenness(camp_net))
+
+# Set edge attributes
+(outer(camp_sex_mat[,1], camp_sex_mat[,1])) %% 2 + 1 -> edge_type
+
+c(4, 20) -> shapes       # Squares and approximate circles
+set.seed(42)
+plot.network(camp_net,
+             label = network.vertex.names(camp_net),
+             vertex.sides = shapes[network::get.vertex.attribute(camp_net, "Sex")],
+             vertex.cex = sqrt(network::get.vertex.attribute(camp_net, "Betweenness")),
+             #             edge.lty = edge_type[as.edgelist(camp_net)[,]])
+             edge.lty = rep(c(1:2), 12))
+```
+
+```{r}
+# Figure 7.7
+read.ucinet.header("Data/campsex") -> camp_sex_hdr
+read.ucinet("Data/campsex") -> camp_sex_mat
+# The next two got imported as a matrix:
+network::set.vertex.attribute(camp_net, "Sex", value = camp_sex_mat[,1])
+network::set.vertex.attribute(camp_net, "Betweenness", value = sna::betweenness(camp_net))
+
+# Induced subgraph:
+conflict_prefer("%s%", "network")  # Also appears in igraph
+camp_net %s% which(network::get.vertex.attribute(camp_net, "Sex") == 1) -> camp_red
+set.seed(42)
+plot.network(camp_red,
+             label = network.vertex.names(camp_red),
+             vertex.cex = sqrt(network::get.vertex.attribute(camp_net, "Betweenness")),
+             pad = 1)
+```
+
+# I'll skip 7.8 and 7.9...nothing much to learn there
+
+```{r}
+# Figure 7.10
+data(karate)
+asNetwork(karate) -> karate_net
+get.neighborhood(karate_net, 1) -> MrHi_neighbors
+c(MrHi_neighbors, 1) -> MrHi_ego
+karate_net %s% MrHi_ego -> MrHi_net
+plot(MrHi_net,
+     label = network.vertex.names(MrHi_net))
+```
+
+```{r}
+# Figure 7.11
+# Note that the attribute used here to define shapes disagrees
+#  with the plot in BEJ
+data(karate)
+asNetwork(karate) -> karate_net
+get.neighborhood(karate_net, 1) -> MrHi_neighbors
+karate_net %s% MrHi_neighbors -> MrHi_net
+c(4,20) -> shapes
+plot.network(MrHi_net,
+             vertex.sides = shapes[network::get.vertex.attribute(MrHi_net, "Faction")],
+             vertex.rot = 45,
+             label = network.vertex.names(MrHi_net),
+             pad = 1)
+```
+
+```{r}
+# Figure 7.12
+fread(file = here("Data/davis.csv"),
+      header = TRUE) -> davis
+as.matrix(davis[,-1]) -> davis_mat
+davis$V1 -> rownames(davis_mat)
+davis_mat %*% t(davis_mat) -> davis_ord    # This is a way to make an 
+#  ordination plot on the rows
+
+
+graph_from_adjacency_matrix(davis_ord,
+                            mode = "undirected",
+                            diag = FALSE,
+                            weighted = TRUE) -> davis_gr
+
+layout_with_kk(davis_gr,
+               weights = 1/E(davis_gr)$weight) -> xy
+set.seed(42)
+plot(davis_gr,
+     layout = xy,
+     vertex.size = 6,
+     vertex.label.dist = 1)
+```
+
+```{r}
+# Figure 7.13
+fread(file = here("Data/davis.csv"),
+      header = TRUE) -> davis
+as.matrix(davis[,-1]) -> davis_mat
+davis$V1 -> rownames(davis_mat)
+davis_mat %*% t(davis_mat) -> davis_ord    # This is a way to make an 
+#  ordination plot on the rows
+
+
+graph_from_adjacency_matrix(davis_ord,
+                            mode = "undirected",
+                            diag = FALSE,
+                            weighted = TRUE) -> davis_gr
+subgraph.edges(davis_gr, 
+               eids = which(E(davis_gr)$weight > 2),
+               delete.vertices = FALSE) -> davis_red  # Keeps the isolated 
+#  vertices
+
+layout_with_kk(davis_red,
+               weights = 1/E(davis_red)$weight) -> xy
+set.seed(42)
+plot(davis_red,              # Ugly plot
+     layout = xy,
+     vertex.size = 6,
+     vertex.label.dist = 1)
+```
+
+```{r}
+# Figure 7.14
+fread(file = here("Data/davis.csv"),
+      header = TRUE) -> davis
+as.matrix(davis[,-1]) -> davis_mat
+davis$V1 -> rownames(davis_mat)
+davis_mat %*% t(davis_mat) -> davis_ord    # This is a way to make an 
+#  ordination plot on the rows
+
+
+graph_from_adjacency_matrix(davis_ord,
+                            mode = "undirected",
+                            diag = FALSE,
+                            weighted = TRUE) -> davis_gr
+
+layout_with_kk(davis_gr,
+               weights = 1/E(davis_gr)$weight) -> xy
+set.seed(42)
+plot(davis_gr,
+     layout = xy,
+     edge.width = E(davis_gr)$weight,
+     vertex.size = 6,
+     vertex.label.dist = 1)
+```
+
+```{r}
+# Figure 7.15
+fread(file = here("Data/Salmon.csv"),
+      header = TRUE) -> salmon
+as.matrix(salmon[,-1]) -> salmon_mat
+salmon$V1 -> rownames(salmon_mat) -> colnames(salmon_mat)
+
+network(salmon_mat, 
+        directed = TRUE) -> salmon_net
+
+network::set.edge.attribute(salmon_net, 
+                            attrname = "weight", 
+                            value = salmon_mat[as.edgelist(salmon_net)[,]])
+
+# In the next, I use the sqrt() to take out some of the variation, and divide
+#  by 20 to scale it a little bit better in relation to the size of the 
+#  graph.
+plot.network(salmon_net,
+             arrowhead.cex = sqrt(network::get.edge.attribute(salmon_net, "weight"))/20)
+```
+
+```{r}
+# Figure 7.16(a)
+fread(file = here("Data/davis.csv"),
+      header = TRUE) -> davis
+as.matrix(davis[,-1]) -> davis_mat
+davis$V1 -> rownames(davis_mat)
+davis_mat %*% t(davis_mat) -> davis_ord    # This is a way to make an 
+#  ordination plot on the rows
+
+
+graph_from_adjacency_matrix(davis_ord,
+                            mode = "undirected",
+                            diag = FALSE,
+                            weighted = TRUE) -> davis_gr
+subgraph.edges(graph = davis_gr,
+               eids = E(davis_gr)[which(E(davis_gr)$weight > 1)]) -> 
+  davis_gr_1
+
+
+layout_with_kk(davis_gr_1,
+               weights = 1/E(davis_gr_1)$weight) -> xy
+set.seed(42)
+plot(davis_gr_1,
+     layout = xy,
+     edge.width = E(davis_gr_1)$weight,
+     vertex.size = 6,
+     vertex.label.dist = 1)
+```
+
+```{r}
+# Figure 7.16(b)
+fread(file = here("Data/davis.csv"),
+      header = TRUE) -> davis
+as.matrix(davis[,-1]) -> davis_mat
+davis$V1 -> rownames(davis_mat)
+davis_mat %*% t(davis_mat) -> davis_ord    # This is a way to make an 
+#  ordination plot on the rows
+
+
+graph_from_adjacency_matrix(davis_ord,
+                            mode = "undirected",
+                            diag = FALSE,
+                            weighted = TRUE) -> davis_gr
+subgraph.edges(graph = davis_gr,
+               eids = E(davis_gr)[which(E(davis_gr)$weight > 2)]) -> 
+  davis_gr_2
+
+
+layout_with_kk(davis_gr_2,
+               weights = 1/E(davis_gr_2)$weight) -> xy
+set.seed(42)
+plot(davis_gr_2,
+     layout = xy,
+     edge.width = E(davis_gr_2)$weight,
+     vertex.size = 6,
+     vertex.label.dist = 1)
+```
+
+```{r}
+# Figure 7.16(c)
+fread(file = here("Data/davis.csv"),
+      header = TRUE) -> davis
+as.matrix(davis[,-1]) -> davis_mat
+davis$V1 -> rownames(davis_mat)
+davis_mat %*% t(davis_mat) -> davis_ord    # This is a way to make an 
+#  ordination plot on the rows
+
+
+graph_from_adjacency_matrix(davis_ord,
+                            mode = "undirected",
+                            diag = FALSE,
+                            weighted = TRUE) -> davis_gr
+subgraph.edges(graph = davis_gr,
+               eids = E(davis_gr)[which(E(davis_gr)$weight > 3)]) -> 
+  davis_gr_3
+
+
+layout_with_kk(davis_gr_3,
+               weights = 1/E(davis_gr_3)$weight) -> xy
+set.seed(42)
+plot(davis_gr_3,
+     layout = xy,
+     edge.width = E(davis_gr_3)$weight,
+     vertex.size = 6,
+     vertex.label.dist = 1)
+```
+
+```{r}
+# Figure 7.16(d)
+fread(file = here("Data/davis.csv"),
+      header = TRUE) -> davis
+as.matrix(davis[,-1]) -> davis_mat
+davis$V1 -> rownames(davis_mat)
+davis_mat %*% t(davis_mat) -> davis_ord    # This is a way to make an 
+#  ordination plot on the rows
+
+
+graph_from_adjacency_matrix(davis_ord,
+                            mode = "undirected",
+                            diag = FALSE,
+                            weighted = TRUE) -> davis_gr
+subgraph.edges(graph = davis_gr,
+               eids = E(davis_gr)[which(E(davis_gr)$weight > 4)]) -> 
+  davis_gr_4
+
+
+layout_with_kk(davis_gr_4,
+               weights = 1/E(davis_gr_4)$weight) -> xy
+set.seed(42)
+plot(davis_gr_4,
+     layout = xy,
+     edge.width = E(davis_gr_4)$weight,
+     vertex.size = 6,
+     vertex.label.dist = 1)
+
+```
+
+```{r}
+# Figure 7.17
+fread("http://vlado.fmf.uni-lj.si/pub/networks/data/ucinet/wiring.dat",
+      skip = 4,               # Must look at the data structure to be sure
+      #  of this
+      header = FALSE,
+      nrows = 14)$V1 -> employees
+as.matrix(fread("http://vlado.fmf.uni-lj.si/pub/networks/data/ucinet/wiring.dat",
+                skip = 41,    # Must look at the data structure to be sure of
+                #  this
+                nrows = 14)) -> games_mat
+employees -> rownames(games_mat) -> colnames(games_mat)
+network(games_mat, directed = FALSE) -> games_net
+
+set.seed(42)
+plot.network(games_net,
+             label = network.vertex.names(games_net),
+             mode = "fruchtermanreingold",           # Nodes "push"
+             #  each other away
+             layout.par = list(niter = 500),         # Random start with 500
+             #  iterations
+             edge.lwd = 2,
+             vertex.col = 8,
+             vertex.sides = 4,    # This doesn't round the corners of the 
+             #  verices
+             vertex.cex = 3,
+             vertex.border = 1,
+             pad = 1)             # My plots clip labels otherwise
+```
+
+```{r}
+# Figure 7.18
+fread("http://vlado.fmf.uni-lj.si/pub/networks/data/ucinet/wiring.dat",
+      skip = 4,               # Must look at the data structure to be sure
+      #  of this
+      header = FALSE,
+      nrows = 14)$V1 -> employees
+as.matrix(fread("http://vlado.fmf.uni-lj.si/pub/networks/data/ucinet/wiring.dat",
+                skip = 55,    # Must look at the data structure to be sure of
+                #  this
+                nrows = 14)) -> conflict_mat
+employees -> rownames(conflict_mat) -> colnames(conflict_mat)
+network(conflict_mat, directed = FALSE) -> conflict_net
+
+set.seed(42)
+plot.network(conflict_net,
+             label = network.vertex.names(conflict_net),
+             mode = "fruchtermanreingold",           # Nodes "push"
+             #  each other away
+             layout.par = list(niter = 500),         # Random start with 500
+             #  iterations
+             edge.lwd = 2,
+             vertex.col = 8,
+             vertex.sides = 4,    # This doesn't round the corners of the 
+             #  verices
+             vertex.cex = 3,
+             vertex.border = 1,
+             pad = 1)             # My plots clip labels otherwise
+```
+
+```{r}
+# Matrix 7.1
+matrix(c(1.000, 0.684, 0.483, 0.440, 0.300,
+         0.684, 1.000, 0.582, 0.543, 0.335,
+         0.483, 0.582, 1.000, 0.613, 0.341,
+         0.440, 0.543, 0.613, 1.000, 0.371,
+         0.300, 0.335, 0.341, 0.371, 1.000),
+       nrow = 5,
+       ncol = 5,
+       byrow = TRUE,
+       dimnames = list(c("T1", "T2", "T3", "T4", "T5"),
+                       c("T1", "T2", "T3", "T4", "T5"))) -> BandB_mat
+BandB_diss = 1 - BandB_mat    # Dissimilarity (not similarity!) matrix
+```
+
+```{r}
+# Figure 7.19
+cmdscale(as.dist(BandB_diss), eig = TRUE, k = 2) -> BandB_fit
+
+x <- BandB_fit$points[, 1]
+y <- BandB_fit$points[, 2]
+# Don't really need a network for this, eh?
+{
+  plot(x, y, pch = 0,
+       ylim = c(-0.3, 0.3),     # Set the ylim a bit big so the label fits
+       ann = FALSE,             # Do not annotate the axes
+       axes = FALSE,            # Do not show the axes
+       frame.plot = TRUE)
+  text(x, y,
+       labels = colnames(BandB_mat),
+       pos = 3)
+}
+```
+
+```{r}
+# Figure 7.20 (almost)
+# I'm not convinced that these data are intepreted correctly.
+#  Even when I dichotomize them, they still don't come anywhere near
+#  what BEJ have. Oh, well.
+read.xlsx(here("Data/burkhardt.xlsx"),
+          sheet = "T1") -> burkhardt_t1
+burkhardt_t1[,1] -> rownames(burkhardt_t1)
+burkhardt_t1[,-1] -> burkhardt_t1
+as.matrix(burkhardt_t1) -> burkhardt_t1
+
+network(burkhardt_t1,
+        directed = FALSE) -> burk_t1_net
+set.seed(42)
+plot(burk_t1_net) # Skip the label of R53
+```
+
+```{r}
+# Figure 7.21
+# I'm not convinced that these data are intepreted correctly.
+#  Even when I dichotomize them, they still don't come anywhere near
+#  what BEJ have. Oh, well.
+read.xlsx(here("Data/burkhardt.xlsx"),
+          sheet = "T5") -> burkhardt_t5
+burkhardt_t5[,1] -> rownames(burkhardt_t5)
+burkhardt_t5[,-1] -> burkhardt_t5
+as.matrix(burkhardt_t5) -> burkhardt_t5
+
+network(burkhardt_t5,
+        directed = FALSE) -> burk_t5_net
+set.seed(42)
+plot(burk_t5_net) # Skip the label of R53
+```
+
+```{r}
+# Figure 7.23
+# There is a problem in the dataset (at least as far
+#  as ca() is concerned: One row (JEAN2) is all zeroes. This is,
+#  mathematically, bad, and ca() doesn't appear to have alternate
+#  methods, so there will be matrix problems.
+# The only way around this that I can see is to delete JEAN
+#  from the analyses. Based on the BEJ plot, they may have 
+#  JEAN2 at (0,0), but that shouldn't be used for missing
+#  data.
+# Hence, I'm going to delete JEAN and JEAN2 from consideration.
+fread(file = here("Data/workshop.csv"),
+      header = TRUE) -> workshop
+workshop[-27,] -> workshop  # JEAN2 row
+workshop[-10,] -> workshop  # JEAN row
+workshop$V1 -> work_names
+as.matrix(workshop[,-1]) -> workshop
+workshop[,-10] -> workshop  # JEAN column
+work_names -> rownames(workshop)
+
+ca(workshop, nd = 2) -> work_ca
+# I find this method easier for this than trying to
+#  fiddle with plot.ca().
+{
+  plot(work_ca$rowcoord[,1],work_ca$rowcoord[,2],
+       cex = 0.7,
+       ann = FALSE,
+       axes = FALSE,
+       frame.plot = TRUE)
+  text(work_ca$rowcoord[,1],work_ca$rowcoord[,2],
+       labels = work_names,
+       pos = 4,
+       cex = 0.6)
+  arrows(x0 = work_ca$rowcoord[1:16,1],
+         y0 = work_ca$rowcoord[1:16,2],
+         x1 = work_ca$rowcoord[17:32,1],
+         y1 = work_ca$rowcoord[17:32,2],
+         length = 0.08)  # This is annoying; it depends a lot
+  #  on the size of the picture.
+  # Zoom in on the final picture.
+}
+```
+
+```{r}
+# Figure 7.24
+fread(file = here("Data/Supremeall.csv"),
+      header = TRUE) -> supreme
+supreme$V1 -> sup_names
+as.matrix(supreme[,-1]) -> supreme
+sup_names -> rownames(supreme)
+
+ca(supreme, nd=2) -> supreme_ca
+plot(supreme_ca) # Again, backwards from BEJ
+```
+
+```{r}
+# Figure 7.25
+fread(file = here("Data/Supremeall.csv"),
+      header = TRUE) -> supreme
+supreme$V1 -> sup_names
+as.matrix(supreme[,-1]) -> supreme
+sup_names -> rownames(supreme)
+
+ca(supreme, nd=2) -> supreme_ca
+
+# ID Renquist
+seq(from = 1, to = 90, by = 9) -> renquist
+{
+  plot(supreme_ca$rowcoord[,1],supreme_ca$rowcoord[,2],
+       cex = 0.7,
+       ann = FALSE,
+       axes = FALSE,
+       frame.plot = TRUE)
+  text(supreme_ca$rowcoord[,1],supreme_ca$rowcoord[,2],
+       labels = sup_names,
+       pos = 4,
+       cex = 0.6)
+  arrows(x0 = supreme_ca$rowcoord[renquist[1:9],1],
+         y0 = supreme_ca$rowcoord[renquist[1:9],2],
+         x1 = supreme_ca$rowcoord[renquist[2:10],1],
+         y1 = supreme_ca$rowcoord[renquist[2:10],2],
+         length = 0.08)  # This is annoying; it depends a lot
+  #  on the size of the picture.
+  # Zoom in on the final picture.
+}
+```
+
+# Figure 7.26
+# Community structure does this too.
+# I won't do this one right now because I can't find the
+#  data needed to do this. However...
+# The function you want is alphahull::ahull(). Once
+#  you have the coordinates of the liberal, swing, and
+#  conservative nodes, you can feed that into ahull(),
+#  and get out the resulting boundaries.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Chapter 8 #####
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
