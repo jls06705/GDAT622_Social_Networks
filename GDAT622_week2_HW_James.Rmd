@@ -1,0 +1,317 @@
+---
+title: "GDAT622_week2_HW_James"
+author: "James Stanfield"
+date: "5/25/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+ 
+{
+  c("alphahull",     # To calculate the convex hull
+    "ca",            # Correspondence analysis
+    "conflicted",    # To deal with conflicting function names
+    # I've had some strangeness with this
+    #  script. I suspect package:conflicted,
+    #  but I don't yet know for sure.
+    "data.table",    # Fast data input/output
+    "dplyr",         # This is all of tidyverse that gets used here
+    "dtplyr",        # dplyr syntax with a data.table backend
+    "here",          # To find/store files w/o setwd() and getwd()
+    "igraph",        # Basic network tools; we'll use statnet mostly
+    "igraphdata",    # Some useful datasets
+    "intergraph",    # Translate between igraph and statnet formats
+    "lmPerm",        # To do permutation tests
+    "statnet"      # A suite of network tools, including ERGM and more
+  ) -> package_names
+  
+  for (package_name in package_names) {
+    if (!is.element(package_name, installed.packages()[, 1])) {
+      install.packages(package_name,
+                       repos = "http://cran.mtu.edu/")
+      # An alternate, just in case.
+      #                      repos="http://lib.stat.cmu.edu/R/CRAN")
+    }
+    library(
+      package_name,
+      character.only = TRUE,
+      quietly = TRUE,
+      verbose = FALSE
+    )
+  }
+  rm(list = c("package_name", "package_names"))
+}
+
+set_here()
+
+# Because I like these options:
+options(show.signif.stars = FALSE)
+options(digits = 4)
+
+```
+
+# Function to read in UCINET data
+
+```{r}
+read.ucinet.header <- function(filename) {
+  # function for reading UCINET header files (recent versions only)
+  # This only works for "single level" files. (In spreadsheet parlance, 
+  # each workbook can have only one sheet.)
+  UCINET.header <- file(paste(filename,".##h",sep=''),"rb")
+  ignore <- readBin(UCINET.header,what="int",size=1)
+  headerversion <- paste(
+    rawToChar(readBin(UCINET.header,what="raw",size=1)),
+    rawToChar(readBin(UCINET.header,what="raw",size=1)),
+    rawToChar(readBin(UCINET.header,what="raw",size=1)),
+    rawToChar(readBin(UCINET.header,what="raw",size=1)),
+    rawToChar(readBin(UCINET.header,what="raw",size=1)),
+    sep='')
+  if (!(headerversion %in% c('DATE:','V6404'))) {
+    close(UCINET.header)
+    stop(paste('unknown header type; try more recent UCINET file types'))
+  }
+  year <- 2000+readBin(UCINET.header,what="int",size=2)
+  month <- c('Jan','Feb','Mar','Apr','May','Jun','Jul','Aug',
+             'Sep','Oct','Nov','Dec')[readBin(UCINET.header,what="int",size=2)]
+  day <- readBin(UCINET.header,what="int",size=2)
+  dow <- c('Monday','Tuesday','Wednesday','Thursday','Friday',
+           'Saturday','Sunday')[readBin(UCINET.header,what="int",size=2)]
+  labtype <- readBin(UCINET.header,what="int",size=2)
+  infile.dt <- c('nodt','bytedt','booleandt','shortintdt','worddt',
+                 'smallintdt','longintdt',' singledt','realdt','doubledt',
+                 'compdt','extendeddt','labeldt','setdt','stringdt','pointerdt',
+                 'chardt','integerdt','nodelistdt','sparsedt','int64dt')[
+                   readBin(UCINET.header,what="int",size=1)]
+  ndim <- readBin(UCINET.header,what="int",size=2)
+  if (headerversion=='V6404') {fct=2} else {fct=1}
+  dims <- c(readBin(UCINET.header,what="int",size=2*fct),
+            readBin(UCINET.header,what="int",size=2*fct))
+  if (ndim==3) {
+    dims[3] <- readBin(UCINET.header,what="int",size=2*fct)
+  }
+  if (!(ndim==2|ndim==3&dims[3]==1)) {
+    close(UCINET.header)
+    stop(paste('UCINET file with',dims[3],'levels; please convert separately'))
+  }
+  t.length <- readBin(UCINET.header,what="int",size=1)
+  if (t.length>0){
+    titl <- sapply(1:t.length, function(i){
+      rawToChar(readBin(UCINET.header,what="raw",size=1))
+    })
+    titl <- paste(titl,collapse='')
+  } else {titl <- ''}
+  haslab <- c(readBin(UCINET.header,what="logical",size=1),
+              readBin(UCINET.header,what="logical",size=1))
+  if (ndim==3) {
+    haslab[3] <- readBin(UCINET.header,what="logical",size=1)
+  }
+  dim.labels <- list()
+  for (arr.dim in 1:length(dims)) {
+    if (haslab[arr.dim]) {
+      dim.labels[[arr.dim]] <- rep(NA,dims[arr.dim])
+      for (i in 1:dims[arr.dim]) {
+        lab <- ''
+        lablen <- readBin(UCINET.header,what="int",size=2)
+        for (let in 1:lablen) {
+          lab <- paste(lab,
+                       rawToChar(readBin(UCINET.header,what="raw",size=1)),
+                       sep='')
+        }
+        dim.labels[[arr.dim]][i] <- lab
+      }
+    }}
+  close(UCINET.header)
+  if (ndim==3&dims[3]==1) {
+    titl <- dim.labels[[3]][1]
+    warning(paste('UCINET file with one level; level name "',
+                  titl,'" treated as network name',sep=''))
+    ndim <- 2
+    dims <- dims[1:2]
+    haslab <- haslab[1:2]
+    dim.labels <- dim.labels[1:2]
+  }
+  return(list(
+    headerversion=headerversion,
+    date=paste(dow,paste(day,month,year,sep='-')),
+    labtype=labtype,
+    infile.dt=infile.dt,
+    ndim=ndim,
+    dims=dims,
+    title=titl,
+    haslab=haslab,
+    dim.labels=dim.labels
+  ))
+}
+
+read.ucinet <- function(filename) {
+  # function for reading UCINET data files (recent versions only)
+  # filename = UCINET filename (without ## extension)
+  # begin of main function code:
+  header <- read.ucinet.header(filename)
+  UCINET.data <- file(paste(filename,".##d",sep=''),"rb")
+  thedata <- c()
+  for (i in 1:(header$dims[1]*header$dims[2]))
+    thedata[i] <- readBin(UCINET.data,what="numeric",size=4,endian='little')
+  close(UCINET.data)
+  mat <- matrix(thedata,nr=header$dims[2],nc=header$dims[1],
+                dimnames=header$dim.labels[c(2,1)],byrow=TRUE)
+  # put additional info from header file on matrix
+  if (header$title!='') {attr(mat,'title') <- header$title}
+  attr(mat,'date') <- header$date
+  #attr(mat,'labtype') <- header$labtype
+  #attr(mat,'infile.dt') <- header$infile.dt
+  return(mat)
+}
+```
+
+# Problem 1
+
+```{r Prob 1 - Distance Matrix}
+#matrix{base} to create a matrix, manually entered values, nrow = number of rows, dimnames = row/column names
+prob1_mat <- matrix(c(0,1,2,3,2,3,4, 1,0,1,2,1,2,3, 2,1,0,1,1,2,3, 3,2,1,0,2,3,4, 2,1,1,2,0,1,2, 3,2,2,3,1,0,1, 4,3,3,4,2,1,0), 
+                nrow = 7,
+                ncol = 7,
+                byrow = TRUE)
+
+c("A","B","C", "D", "E", "F", "G") -> prob1_names -> rownames(prob1_mat) -> colnames(prob1_mat)
+
+as.dist(prob1_mat) -> prob1_dist #as.dist to convert to distance type
+prob1_dist
+```
+
+```{r Prob 1 - MDS}
+fit <- cmdscale(prob1_dist, eig = TRUE, k = 2) #cmdscale {stats} performs MultiDimensional Scaling (MDS)
+x <- -fit$points[, 1]  # Otherwise, the plot is reversed
+y <- fit$points[, 2]   # This should be reversed, but isn't in
+#  the text
+
+{
+  plot(x, y, pch = 19, xlim = range(x) + c(0, 5))
+  text(x, y, pos = 4, labels = prob1_names)
+}
+```
+
+# Problem 2
+
+```{r Prob 2 - matrix}
+prob2_mat <- matrix(c(11,4,7,0, 11,2,14,7, 2,12,11,14, 8,7,9,15, 9,6,6,12), 
+                nrow = 5,
+                ncol = 4,
+                byrow = TRUE,
+                dimnames = list(
+                  "Ethnic Group" = c("Older Italian", "Younger_Italian", "Lower48-1", "Lower48-2", "Lower48-3"),
+                  "Theme" = c("Groups", "Single", "Work", "Aesthetic")))
+
+prob2_mat
+```
+
+```{r Prob 2 - Masses}
+#sum up all the values in the table
+prob2_n = sum(prob2_mat)
+#compute the table of proportions, P
+prob2_P = prob2_mat / prob2_n
+
+#Calculate the row and column masses
+prob2_column.masses = colSums(prob2_P)
+prob2_row.masses = rowSums(prob2_P)
+prob2_row.masses
+prob2_column.masses
+```
+
+We can see that Older Italians make up 13.17% of participants, and 28.14% of photos had a work theme.
+Assuming that ethnicity has no effect on photo themes, we would expect ~3% of participants
+to be Older Italians who took Work themes photos (13.17% of 28.14%).
+
+We can calculate all of these expected values.
+
+```{r Prob 2 - Expected Values}
+prob2_E = prob2_row.masses %o% prob2_column.masses
+prob2_E
+```
+
+```{r Prob 2 - Residuals}
+#Calculate residuala
+prob2_R = prob2_P - prob2_E
+
+#Convert to indexed residuals
+prob2_I = prob2_R / prob2_E
+prob2_I
+```
+
+Relative to our expectations, Older Italians are twice as likely to take group photos and took no aesthetic images; while Younger Italians favored Work themes pictures.
+
+Lower48-1 took more single person or aesthetic photos, while Lower48-2 only favored the aesthetic, and Lower48-3 went for group and aesthetic.
+
+
+# Problem 3
+
+```{r Prob 3 - MDS}
+# Read Data/Science_Collaboration from the UCI data:
+read.ucinet.header(here("Data/Science_Collaboration")) -> prob3_hdr
+read.ucinet(here("Data/Science_Collaboration")) -> prob3_mat
+prob3_hdr$dim.labels[[1]] -> rownames(prob3_mat) -> colnames(prob3_mat)
+
+#Convert matrix to distance matrix
+
+as.dist(prob3_mat) -> prob3_dist #as.dist to convert to distance type
+
+prob3_fit <- cmdscale(prob3_dist, eig = TRUE, k = 2) #cmdscale {stats} performs MultiDimensional Scaling (MDS)
+prob3_x <- -prob3_fit$points[, 1]  # Otherwise, the plot is reversed
+prob3_y <- prob3_fit$points[, 2]   # This should be reversed, but isn't in
+#  the text
+
+{
+  plot(prob3_x, prob3_y, pch = 19, xlim = range(prob3_x) + c(0, 5), ylim = range(prob3_y))
+  text(prob3_x, prob3_y, pos = 4, labels = prob3_hdr$dim.labels[[1]])
+}
+```
+
+It looks like there is an extremely high degree of collaboration. Of the the 42 members, 37 appear to be pretty much on top of each other.
+
+```{r Prob 3 - Stress}
+#put code for calculating stress here
+```
+
+# Problem 4
+
+```{r Prob 4 -  Hierarchical Clustering}
+#Using same distance matrix from problem 3
+prob4_dist <- prob3_dist
+
+# cluster using hclust {stats}
+hclust(prob4_dist, method="average") -> prob4_hc_ave
+# plot the dendrogram
+plot(prob4_hc_ave)
+prob4_hc_ave$height
+```
+
+We can see the groups separating pretty early. At the bottom, we have 2 main groups which each hold roughly a third each, while the remaining third is divided into four other groups (one of which holds only a single member).
+
+
+
+# Problem 5
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
