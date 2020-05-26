@@ -1,0 +1,225 @@
+---
+title: "Factor Analysis"
+author: "BPR"
+date: "5/7/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+c("conflicted",
+  "data.table",
+  "dplyr",
+  "dtplyr",
+  "GPArotation",       # Must be installed for psych::fa()
+  "nFactors",
+  "psych",
+  "sem"
+) -> package_names
+  
+  for (package_name in package_names) {
+    if (!is.element(package_name, installed.packages()[, 1])) {
+      install.packages(package_name,
+                       repos = "http://cran.mtu.edu/")
+    }
+    library(
+      package_name,
+      character.only = TRUE,
+      quietly = TRUE,
+      verbose = FALSE
+    )
+  }
+  rm(list = c("package_name", "package_names"))
+
+# Because I like these options:
+options(show.signif.stars = FALSE)
+options(digits = 4)
+```
+
+## Plant Growth
+Use Crawley's pgfull.txt file for the data:
+
+- Columns 1:54 are the plant species
+- Plot (89 different ones)
+- Lime amount
+- Biodiversity
+- Hay mass
+- Soil pH
+
+```{r data}
+fread(file = "/Users/Barney/Google Drive/Statistics/Crawley () - The R Book files/pgfull.txt", header = TRUE) -> pgdata
+pgdata[,1:54] -> pgd
+```
+
+In _exploratory factor analysis_, we have to decide how many factors to use. This is usually driven by either:
+
+- Theory (if possible)
+- What is useful (e.g., don't make more factors than you can deal with)
+- Do some principal component analysis
+- SWAG (if necessary)
+
+We'll use 8 factors for starters
+```{r faPart1}
+factanal(pgd, 8)
+```
+
+Things to notice:
+
+- Loadings
+- Cumulative proportion of variance explained
+
+Let's try fewer factors, just to see what's what:
+```{r faPart2}
+factanal(pgd, 6)
+```
+
+An alternative approach
+```{r psychFA}
+fa(pgd, 8)
+```
+Note the warning...well, the issue is that there are some fancy matrix operations involved, and working with nearly singular matrices can be tricky. Hence, this result may not be trustworthy!
+```{r psychFA2}
+fa(pgd, 8, fm = "ml")
+```
+
+Better!
+
+
+### Alternate approaches
+```{r}
+fit <- princomp(pgd, cor=TRUE)
+summary(fit) # print variance accounted for
+loadings(fit) # pc loadings
+plot(fit,type="lines") # scree plot
+## Lots of information
+##  fit$scores # the principal components
+# Lots of information; too busy for here, really
+biplot(fit)
+```
+
+
+Varimax Rotated Principal Components: retaining 5 components
+```{r}
+fit <- principal(pgd, nfactors=5, rotate="varimax")
+fit # print results
+```
+
+
+Maximum Likelihood Factor Analysis
+extracting 3 factors, with varimax rotation
+
+```{r}
+fit <- factanal(pgd, 3, rotation="varimax")
+print(fit, digits=2, cutoff=.3, sort=TRUE)
+# plot factor 1 by factor 2
+load <- fit$loadings[,1:2]
+plot(load,type="n") # set up plot
+text(load,labels=names(pgd),cex=.7) # add variable names
+```
+
+
+Another way to determine Number of Factors to Extract
+```{r}
+ev <- eigen(cor(pgd)) # get eigenvalues
+ap <- nFactors::parallel(subject=nrow(pgd),var=ncol(pgd),
+  rep=100,cent=.05)
+nS <- nScree(x=ev$values, aparallel=ap$eigen$qevpea)
+plotnScree(nS)
+```
+
+
+
+
+## Beginning English Teachers
+Back in the dark ages, I worked with some English educators on a study of beginning English teachers. (Not-so-humble brag: Among other things, we were awarded the Richard A. Meade research award by the Council of English Education for this work.) At the time, there was a theory about the concerns of teachers, and that they grouped into 9 categories (e.g., concern about preparation, realtionships with students, ability to assign grades, etc.) and so we looked to see if this were so. As one part of the analysis, we created a survey for beginning teachers and performed a factor analysis on the results. (We clustered these results, too; that was helpful.)
+
+For help in understanding things, the questions were labelled "qyyzz" where "yy" was the hypothesized category, and "zz" was the question number on the survey. Also, the "experience" variable is categorical:
+
+Pre-service teachers:
+
+1 - no methods courses & no observations
+2 - methods courses but no observations
+3 - observations but no student teaching
+4 - currently student teaching
+5 - other
+
+In-service teachers:
+
+1 - 1 to 5 years
+2 - 6 to 10 years
+3 - 11 to 15 years
+4 - 16 to 20 years
+5 - 21 or more years
+
+Let's factor analyze:
+```{r EnglishTeachers}
+# The next is only some of the data, so the results won't match exactly what we published...
+fread("http://citadel.sjfc.edu/faculty/bricca/Data/Supporting_Teacher_Data.csv",
+      header = TRUE) -> english
+english %>%
+  dplyr::filter(., group == "pre-service") -> pre_serv
+pre_serv[,2:67] -> pre_serv
+factanal(pre_serv, 9) -> eng_9
+eng_9
+```
+
+Hmm...doesn't quite look right; factor nine has really only one question in it. That's often an indication of the wrong number of factors. So...
+```{r}
+factanal(pre_serv, 8) -> eng_8
+eng_8
+```
+
+Hmm...looks better. If we consider only loadings greater than 0.5 (which is a common way to think about these things):
+
+* category 01 loads onto factor 1 or nowhere
+* category 02 loads onto factor 5 or nowhere
+* category 03 loads onto factor 2 (except for question 07)
+* category 04 loads onto factors 2 or 6 or nowhere
+* category 05 loads onto nowhere
+* category 06 loads onto factor 4 or nowhere
+* category 07 loads onto factor 6 or mostly 7 or nowhere
+* category 08 loads onto factor 3 (exactly!)
+* category 09 loads onto nowhere
+
+OK, the theory wasn't perfect...but it wasn't bad either. (It was better with the full data set.) If we relax the loadings (say to 0.4 or something) things are still not bad.
+
+We could, if desired, do other things (like cluster the data, which we did) and so on.
+
+_Clustering_ is important, as it attempts to walk a middle ground between group-level properties (too course-grained) and individual-level properties (too fine-grained). We "[assign] items into groups or classes based on similarities or distances between them" (BEJ section 6.4). And while we do this all the time -  schools put students in tracks, and we all categorize people and events - this sort of complexity reduction can be problematic:
+
+* Arrogance of reducer: You assume you know everything of importance
+* Violence done to the reduced: all of me is important to me, so leaving any of it out doesn't do me justice
+
+Still, let's do some of this. First, you should know that there are several uses of the word "cluster", so a modifier is always appropriate. BEJ 6 talks of _hierarchical clustering_, and gives the process; their example of distances between US cities is instructive (in Figure 6.5 remember the "Level" reads down the column; across that row is just the number that lists the order in which the cities were originally given).
+
+## Clustering
+
+Here's some sample clusterings to look at, using the package:dendextend, which can be a helpful package:
+[Cluster examples](https://cran.r-project.org/web/packages/dendextend/vignettes/Cluster_Analysis.html)
+
+But for us:
+```{r clusterFactors}
+fread("http://citadel.sjfc.edu/faculty/bricca/Data/BeginningTeacherFactors(Z).csv")->fac.df
+
+fac.df %>%
+  dplyr::filter(.,group=="pre-service") %>%
+  select(.,factor_classroom, factor_workload, factor_appearance,
+         factor_colleagues, factor_parents, factor_grading,
+         factor_preparation, factor_autonomy) -> temp.df
+paste("T",1:nrow(temp.df),sep="")->labels
+hclust(dist(temp.df))->hteach # Do this clustering first
+plot(hteach,labels=labels, main= "")
+```
+
+From here, we see if we can identify what is important about the clusters, often by doing significance testing between the clusters.
+
+### Number of clusters
+
+Approaches to clustering:
+
+* fvis() in _package:factoextra_
+* topology: Essentially, look for long lines on the dendograms
+* [Others](http://www.rpubs.com/s_ritesh/Deciding_Clusters)
+* [Still others](https://www.statmethods.net/advstats/cluster.html)
+* [Still more](https://towardsdatascience.com/10-tips-for-choosing-the-optimal-number-of-clusters-277e93d72d92)
+
