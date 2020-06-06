@@ -1,0 +1,137 @@
+---
+title: "GDAT622_Invest_2"
+author: "James Stanfield"
+date: "6/6/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+{
+  c("alphahull",     # To calculate the convex hull
+    "ca",            # Correspondence analysis
+    "conflicted",    # To deal with conflicting function names
+    # I've had some strangeness with this
+    #  script. I suspect package:conflicted,
+    #  but I don't yet know for sure.
+    "data.table",    # Fast data input/output
+    "dplyr",         # This is all of tidyverse that gets used here
+    "dtplyr",        # dplyr syntax with a data.table backend
+    "here",          # To find/store files w/o setwd() and getwd()
+    "igraph",        # Basic network tools; we'll use statnet mostly
+    "igraphdata",    # Some useful datasets
+    "intergraph",    # Translate between igraph and statnet formats
+    "lmPerm",        # To do permutation tests
+    "statnet",       # A suite of network tools, including ERGM and more
+    "openxlsx",
+    "networkdata",
+    "R.matlab",
+    "farver"         # ggraph and graphlayouts
+  ) -> package_names
+  
+  for (package_name in package_names) {
+    if (!is.element(package_name, installed.packages()[, 1])) {
+      install.packages(package_name,
+                       repos = "http://cran.mtu.edu/")
+      # An alternate, just in case.
+      #                      repos="http://lib.stat.cmu.edu/R/CRAN")
+    }
+    library(
+      package_name,
+      character.only = TRUE,
+      quietly = TRUE,
+      verbose = FALSE
+    )
+  }
+  rm(list = c("package_name", "package_names"))
+}
+
+library(ggraph)
+library(graphlayouts)
+
+set_here()
+
+# Because I like these options:
+options(show.signif.stars = FALSE)
+options(digits = 4)
+```
+
+```{r Load data and pull out matrix}
+readMat(here("Data/facebook100/Howard90.mat")) -> how_data
+how_data$A -> how_mat
+```
+
+```{r edges}
+ergm(how_mat ~ edges) -> how1         # AIC: 3831040
+summary(how1)
+```
+
+So starting with edges gives us an AIC of 3831040 to start
+
+```{r istar}
+ergm(how_mat ~ edges + istar(2)) -> how2  # AIC: 3824915
+summary(how2)
+```
+
+AIC dropped.
+
+```{r mutual}
+
+ergm(how_mat ~ edges + istar(2) + mutual) -> how3  # AIC: 3658574
+summary(how3)
+```
+
+That's another AIC drop.
+
+After the last ergm took so long to run, I'm not inclined to add any other predictors.
+Looking at what we have, both number of ties (edges) and repriprocity of ties (mutual)
+were considered significant in how2 model. Unfortunately, the p-value of mutual is
+given as NA above. Lets's look at the values for our predictors.
+
+The istar values is incredibly small compared to edges and mutual, so we can probably ignore that term with very little trouble.
+
+The mutual term is the largest as well as positive, meaning that the model predicts that connections are very likely to be returned.
+
+Let's do some more diagnostics.
+
+```{r mcmc diagnostics}
+mcmc.diagnostics(how3)
+```
+
+well diagnostics pretty much just says that it can't compute properly, so I won't be accepting anything from the output as accurate.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
