@@ -1,0 +1,153 @@
+---
+title: "GDAT622_Investigation3_James"
+author: "James Stanfield"
+date: "6/13/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+{
+  c("alphahull",     # To calculate the convex hull
+    "ca",            # Correspondence analysis
+    "conflicted",    # To deal with conflicting function names
+    # I've had some strangeness with this
+    #  script. I suspect package:conflicted,
+    #  but I don't yet know for sure.
+    "data.table",    # Fast data input/output
+    "dplyr",         # This is all of tidyverse that gets used here
+    "dtplyr",        # dplyr syntax with a data.table backend
+    "here",          # To find/store files w/o setwd() and getwd()
+    "igraph",        # Basic network tools; we'll use statnet mostly
+    "igraphdata",    # Some useful datasets
+    "intergraph",    # Translate between igraph and statnet formats
+    "lmPerm",        # To do permutation tests
+    "statnet",       # A suite of network tools, including ERGM and more
+    "openxlsx",
+    "networkdata",
+    "purrr",
+    "farver"         # ggraph and graphlayouts
+  ) -> package_names
+  
+  for (package_name in package_names) {
+    if (!is.element(package_name, installed.packages()[, 1])) {
+      install.packages(package_name,
+                       repos = "http://cran.mtu.edu/")
+      # An alternate, just in case.
+      #                      repos="http://lib.stat.cmu.edu/R/CRAN")
+    }
+    library(
+      package_name,
+      character.only = TRUE,
+      quietly = TRUE,
+      verbose = FALSE
+    )
+  }
+  rm(list = c("package_name", "package_names"))
+}
+
+library(ggraph)
+library(graphlayouts)
+
+set_here()
+
+# Because I like these options:
+options(show.signif.stars = FALSE)
+options(digits = 4)
+```
+
+```{r Load data and sort by season}
+#Download list of edgelist dataframes
+paste0("https://raw.githubusercontent.com/mathbeveridge/gameofthrones/master/data/got-s",1:8,"-edges.csv") -> edges
+purrr::map(edges, read.csv) -> edges_tbl
+
+#Convert edgelists to Igraph objects
+edges_tbl[1] %>% graph.data.frame(., directed=FALSE)-> season1
+edges_tbl[2] %>% graph.data.frame(., directed=FALSE)-> season2
+edges_tbl[3] %>% graph.data.frame(., directed=FALSE)-> season3
+edges_tbl[4] %>% graph.data.frame(., directed=FALSE)-> season4
+edges_tbl[5] %>% graph.data.frame(., directed=FALSE)-> season5
+edges_tbl[6] %>% graph.data.frame(., directed=FALSE)-> season6
+edges_tbl[7] %>% graph.data.frame(., directed=FALSE)-> season7
+edges_tbl[8] %>% graph.data.frame(., directed=FALSE)-> season8
+```
+
+
+
+```{r season1}
+plot(season1, remove.multiple = F, remove.loops = T, vertex.label= NA,
+     vertex.size = 5,
+     layout = layout_with_lgl)
+```
+
+In the first season, it looks like pretty much everyone is more or less part of one group. The majority of the show focuses on King's Landing in Westeros, with some time spent in Essos with Daenerys and Drogo, and some time with the Night's Watch and Jon Snow.
+
+```{r season 2}
+plot(season2, remove.multiple = F, remove.loops = T, vertex.label = NA,
+     vertex.size = 5)
+```
+
+This changes in the second, where we can see three groups, one of which isn't even connected back to the majority anymore. This matches the show splitting itself between the North v. King's Landing war, the Night's Watch, and Essos.
+
+```{r season 3}
+plot(season3, remove.multiple = F, remove.loops = T, vertex.label = NA,
+     vertex.size = 5)
+```
+
+We can see the network continuing to spread out out. The North v. King's landing war concludes as the Night's watch become more and more separated from the narratives in the rest of Westeros. Daenerys' stroyline grows dramatically in both scale and dramatis personae, including Barristan Selmy, formerly a King's Landing member.
+
+```{r season 4}
+plot(season4, remove.multiple = F, remove.loops = T, vertex.label = NA,
+     vertex.size = 5)
+```
+
+Now we can see four main groups with a trio of nodes set off by themselves.
+This is expected, as season four saw the most separation between major story lines.
+King's landing, the North, Essos, the Night's Watch, and Ara Stark are all pretty
+separated in their own narratives.
+
+```{r season 5}
+plot(season5, remove.multiple = F, remove.loops = T, vertex.label = NA,
+     vertex.size = 5)
+```
+
+Season 5 sees some of the storylines from season four start to slowly collect back together. Tyrian, a major character from the King's Landing group, transfers to the Essos group. Sansa, another King's Landing member, transfers to the North.
+
+```{r season 6}
+plot(season6, remove.multiple = F, remove.loops = T, vertex.label = NA,
+     vertex.size = 5)
+```
+
+Season 6 is the last season before all our storylines converge in season 7. Jon Snow and the Night's Watch fight a war for the North. Daenerys is finishes her work in Essos and sets sail for Westeros, as King's landing resolves it's latest internal conflict involving the Faith Militant. Arya finishes her training with the Faceless Men. With their internal plotlines mostly resolved, our groups are set on a collision course with each other.
+
+```{r season 7}
+plot(season7, remove.multiple = F, remove.loops = T, vertex.label = NA,
+     vertex.size = 5)
+```
+
+Season 7 is the beginning of the end, as all our storylines converge in Westeros. Jon Snow and the Night's Watch reconnected with the North last season, and now have tied in with Daenerys and her Essos party, who are in turn engaged in a war with the King's Landing group. Arya has also returned to the North.
+
+```{r season 8}
+plot(season8, remove.multiple = F, remove.loops = T, vertex.label = NA,
+     vertex.size = 5)
+```
+
+Season 8 is the finale, the main plot of the Night's Watch concludes with a battle in the North involving the Essos party and Arya. These groups then march on King's Landing for the final battle of the series. The show ends with the majority of our main characters in or near King's Landing before separating again in the epilogue.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
