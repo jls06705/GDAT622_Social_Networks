@@ -1,0 +1,255 @@
+---
+title: "GDAT622_Investigation4_James"
+author: "James Stanfield"
+date: "6/21/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+{
+  c("alphahull",     # To calculate the convex hull
+    "ca",            # Correspondence analysis
+    "conflicted",    # To deal with conflicting function names
+    # I've had some strangeness with this
+    #  script. I suspect package:conflicted,
+    #  but I don't yet know for sure.
+    #"data.table",    # Fast data input/output
+    #"dplyr",         # This is all of tidyverse that gets used here
+    "tidyverse",        # dplyr syntax with a data.table backend
+    "here",          # To find/store files w/o setwd() and getwd()
+    "igraph",        # Basic network tools; we'll use statnet mostly
+    "igraphdata",    # Some useful datasets
+    "intergraph",    # Translate between igraph and statnet formats
+    "lmPerm",        # To do permutation tests
+    "statnet",       # A suite of network tools, including ERGM and more
+    "openxlsx",
+    "networkdata",
+    "farver"         # ggraph and graphlayouts
+  ) -> package_names
+  
+  for (package_name in package_names) {
+    if (!is.element(package_name, installed.packages()[, 1])) {
+      install.packages(package_name,
+                       repos = "http://cran.mtu.edu/")
+      # An alternate, just in case.
+      #                      repos="http://lib.stat.cmu.edu/R/CRAN")
+    }
+    library(
+      package_name,
+      character.only = TRUE,
+      quietly = TRUE,
+      verbose = FALSE
+    )
+  }
+  rm(list = c("package_name", "package_names"))
+}
+
+#library(ggraph)
+#library(graphlayouts)
+
+set_here()
+
+# Because I like these options:
+options(show.signif.stars = FALSE)
+options(digits = 4)
+```
+
+Data is originally from https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0145450
+
+```{r Load the data}
+load(here("Data/Emotions.RData"))
+
+#Let's take a quick look at our data:
+head(emotion_raw)
+```
+
+
+```{r How many per subject}
+#Let's get a sense of roughly how many data points per subject we have
+dplyr::filter(emotion_raw, id == 1)
+
+#Looks like subject 1 only has 7 entries.
+```
+
+```{r Summary}
+summary(emotion_raw)
+```
+
+Looking at the summary tells us that we have 1200 rows with NA's. Given that we have over 60,000 rows, I have no problem just eliminating those rows.
+
+```{r remove NA}
+ #complete.case to only keep filled rows       distinct to remove duplicate rows
+emotion_raw[complete.cases(emotion_raw), ] %>% distinct(.) -> emotion2
+str(emotion2)
+```
+
+We still have over 68,000 rows, so we haven't lost that much data. This will make it simpler when we build our matrix(ces) later.
+
+```{r How many unique id}
+n_distinct(emotion2$id)
+```
+
+```{r How many distinct days}
+unique(emotion2$Day)
+```
+
+```{r Prototype filtering to find matches}
+dplyr::filter(emotion2, Pride == 1) %>% dplyr::filter(., Day == 1)
+```
+
+Completely  by luck, I have stumbled across a weird duplicate for id = 47, Hours = 20, Day = 1. These rows are not perfect duplicates, but fit in exactly the same slot. I'm not sure how to handle this as this may not be an isolated case. I'll ignore it for now, but may have to come back and fix it if I start to get strange results.
+
+```{r more prototyping}
+dplyr::filter(emotion2, Pride == 1) %>% dplyr::filter(., Day == 1) %>% arrange(., Hours)
+```
+
+
+```{r build a more useful dataframe}
+select(emotion2, 4:21) -> emotion3
+emotion3$row_num <- seq.int(nrow(emotion3))
+
+#For speed sake, we'll just pluck out the out the first 1000 entries.
+select(emotion3[1:1000,], 19, 1:18)  -> emotion_final
+
+emotion_final[1:20,]
+```
+
+```{r Create edgelist}
+#use expand grid to create every possible edge
+expand.grid(colnames(emotion_final[,-1]), colnames(emotion_final[,-1]), w = 0,
+            KEEP.OUT.ATTRS = TRUE, stringsAsFactors = TRUE) %>%
+  dplyr::filter(Var1 != Var2)-> el
+
+el
+```
+
+```{r adjacency matrix}
+
+names <- colnames(emotion_final[,-1])
+
+matrix(0,
+       nrow = (18),
+       ncol = (18),
+       dimnames = list(c(names), c(names))
+       ) -> emotion_mat #create matrix of correct size
+emotion_mat
+```
+
+Now that we have an empty matrix waiting, let's see about filling it.
+```{r Populate matrix machine, eval=FALSE, include=FALSE}
+tempk <- double()
+
+#for each entry
+for(i in 1:nrow(emotion_final)) { #i
+          test1 <- i
+  #Take each emotion
+  for(j in 2:18) {#j
+          test2 <- j
+    #and give a zero if emotion is zero
+    ifelse(emotion_final[i,j] == 0, 0, 
+            
+           #otherwise compare to each other emotion
+           for (k in (i+1):19) {#k
+             tempk <- k
+             #and give a 1 if both 1, and 0 if not
+             ifelse(emotion_final[i,j] == emotion_final[i,k], 1, 0) 
+             
+           }#k
+          
+        #then send the 1 or 0 to temp1          
+    ) -> temp1
+    
+    #add that temp1 value to the matrix spot for those two emotions  
+    emotion_mat[j,tempk-1] <- emotion_mat[j,tempk-1] + temp1
+    emotion_mat[tempk-1,j] <- emotion_mat[tempk-1,j] + temp1
+  }#j
+} #i
+```
+
+I've spent hours trying to debug the machine tom populate the matrix, but I'm having no luck.
+
+Instead, I'm just going to build a network for a single subject.
+
+It is more tedious and much more limited in scope, but I am out of time to make something nice, and must settle for what I can force to work.
+
+```{r How many for subject 8}
+#Let's get a sense of roughly how many data points per subject we have
+dplyr::filter(emotion_raw, id == 1)
+dplyr::filter(emotion_raw, id == 8)
+dplyr::filter(emotion_raw, id == 15)
+
+#Looks like subject 8 only has 21 entries.
+```
+
+```{r Manual Edgelist}
+emote1 <- c(  "Joy",       "Joy",       "Joy",     "Alertness",  "Alertness","Alertness","Sadness","Sadness",
+            "Gratitude","Gratitude","Gratitude")
+
+emote2 <- c("Amusement","Alertness","Satisfaction","Embarrassment","Anxiety",  "Sadness","Anxiety","Offense",
+            "Alertness", "Anxiety", "Sadness")
+
+weight <- c(    1,           1,           1,              1,           2,         2,        2,         1,
+                1,           1,          1)
+
+el <- data.frame("emotion1" = emote1, "emotion2" = emote2, "weight" = weight)
+el
+```
+
+```{r Convert to igraph object}
+graph_from_data_frame(el, directed = FALSE) -> emote_igraph
+emote_igraph
+```
+
+```{r plot network}
+set.seed(42)
+E(emote_igraph)$width <- E(emote_igraph)$weight*3
+plot(emote_igraph, vertex.shape = "none")
+```
+
+Granting that I am building this from limited data, we can still see what patterns have emerged, and consider whether or not they seem reasonable.
+
+We can see that Joy, Amusement, and Satisfaction or out on their own branch. None of them are connected to any "negative" emotions.
+
+In contrast, Alertness, Anxiety, and Sadness are at the center of the graph, with more weighted edges connecting them.
+This makes some sense, as when I feel sad or anxious, I often will end up feeling both.
+
+The most interesting thing to me though, is how Gratitude ties to anxiety and sadness, but not joy. The more that I think about it, the moments when I have been most greatful have been when someone has helped relieve my sadness or anxiety. Joy often comes later, but doesn;t tend to mix with sadness or anxiety the way gratitude does.
+
+```{r Centrality Comparison}
+set.seed(40)
+emote_igraph$eigen  <- centr_eigen(emote_igraph)
+emote_igraph$betw   <- centr_betw(emote_igraph)
+
+plot(emote_igraph, edge.size = 0.5,
+     vertex.size = emote_igraph$eigen$vector*20)
+
+plot(emote_igraph, edge.size = 0.5,
+     vertex.size = emote_igraph$betw$res)
+```
+
+I would choose Alertness as the most central emotion, as it scores highly on both eigen vector and betweeness centrality.
+
+Betweeness also highlights the gatekeeper, Joy.
+
+Eigen highlights Sadness, Anxiety, and Gratitude.
+
+In a network this small, identifying central nodes is fairly simple, but it is still interesting to see what stands out in contrast.
+
+Gratitude, for example is very influential due to its connection to our central block of Alertness, Anxiety, and Sadness. Eigen points this out, while betweeness ignores Gratitude due to Gratitude not being the only shortest path between any two edges.
+
+This contrast when comparing eigen and betweeness is why those two centrality methods have become my favorites to run together. Betweeness is all about access to the network as whole, those critical intersections that control the flow of information. Eigen is instead all about direct interactions, the nodes that have many infuential connections and can affect the greatest number of nodes in the fewest number of steps.
+
+
+
+
+
+
+
+
+
+
+
+
+
