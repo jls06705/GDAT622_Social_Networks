@@ -1,0 +1,422 @@
+---
+title: "GDAT622_Invest5_James"
+author: "James Stanfield"
+date: "6/26/2020"
+output: word_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+{
+  c("alphahull",     # To calculate the convex hull
+    "ca",            # Correspondence analysis
+    "conflicted",    # To deal with conflicting function names
+    # I've had some strangeness with this
+    #  script. I suspect package:conflicted,
+    #  but I don't yet know for sure.
+    "data.table",    # Fast data input/output
+    "dplyr",         # This is all of tidyverse that gets used here
+    "dtplyr",        # dplyr syntax with a data.table backend
+    "here",          # To find/store files w/o setwd() and getwd()
+    "igraph",        # Basic network tools; we'll use statnet mostly
+    "igraphdata",    # Some useful datasets
+    "intergraph",    # Translate between igraph and statnet formats
+    "lmPerm",        # To do permutation tests
+    "statnet",       # A suite of network tools, including ERGM and more
+    "openxlsx",
+    "networkdata",
+    "farver"         # ggraph and graphlayouts
+  ) -> package_names
+  
+  for (package_name in package_names) {
+    if (!is.element(package_name, installed.packages()[, 1])) {
+      install.packages(package_name,
+                       repos = "http://cran.mtu.edu/")
+      # An alternate, just in case.
+      #                      repos="http://lib.stat.cmu.edu/R/CRAN")
+    }
+    library(
+      package_name,
+      character.only = TRUE,
+      quietly = TRUE,
+      verbose = FALSE
+    )
+  }
+  rm(list = c("package_name", "package_names"))
+}
+
+library(ggraph)
+library(graphlayouts)
+
+set_here()
+
+# Because I like these options:
+options(show.signif.stars = FALSE)
+options(digits = 4)
+```
+
+```{r Load data}
+fread("Amazon_data/amazon-2003-03-02.txt") -> amazon_el
+head(amazon_el)
+```
+
+We need to clean up the ID = 0 entries, as Igraph does not like vertices with a name of 0.
+
+```{r modify node names}
+# paste an "a" in front of every name
+paste0("a", amazon_el$V1) -> amazon_el$V1
+paste0("a", amazon_el$`FromNodeId ToNodeId`) -> amazon_el$`FromNodeId ToNodeId`
+head(amazon_el)
+```
+
+Hopefully we won't have any issues from the node names!
+
+```{r Create Igraph version}
+#I'm treating it as undirected, as some methods only work with undirected
+graph_from_data_frame(amazon_el, directed = FALSE) -> amazon_igraph
+amazon_igraph
+```
+
+Now for the long haul, Let's plot the network
+
+```{r Plot the whole thing. }
+#start_time <- Sys.time()
+
+#plot(amazon_igraph)
+
+#end_time <- Sys.time()
+
+#end_time - start_time
+```
+
+After 3 hours, I wasn't sure if my computer was hung up or if it really needed that long. I stopped the attempt to show the whole network in favor of pursuing other approaches to study the data.
+
+```{r Lovain}
+cluster_louvain(amazon_igraph, weights = NULL) -> amazon_louvain
+amazon_louvain
+```
+
+Louvain identified 210 groups.
+
+```{r Lovain group 1}
+amazon_louvain[1]
+```
+
+
+Let's try to only show the first group Louvain pulled out.
+
+```{r Manually force just group 1 network, eval=FALSE, include=FALSE}
+dplyr::filter(amazon_el, V1 == c(
+    "a0"  ,  "a1"   , "a2"  ,  "a3"  ,  "a4"   , "a5"   , "a6"   , "a10"  , "a12"  ,"a16"  , "a19"  , "a30"  , "a48"  
+  ,"a49"  , "a50"   ,"a63"  , "a64"  , "a65"   ,"a66"   ,"a67"   ,"a73"   ,"a74"   ,"a75"  , "a89"  , "a90"  , "a97"  
+  ,"a98"  , "a99"   ,"a100" , "a101" , "a108"  ,"a109"  ,"a110"  ,"a116"  ,"a117"  ,"a118" , "a119" , "a123" , "a124" 
+  ,"a125" , "a126"  ,"a127" , "a131" , "a135"  ,"a136"  ,"a139"  ,"a149"  ,"a150"  ,"a156" , "a157" , "a158" , "a172" 
+  ,"a173" , "a175"  ,"a176" , "a177" , "a180"  ,"a184"  ,"a185"  ,"a186"  ,"a196"  ,"a204" , "a205" , "a206" , "a207" 
+  ,"a211" , "a218"  ,"a233" , "a234" , "a246"  ,"a247"  ,"a248"  ,"a257"  ,"a258"  ,"a260" , "a261" , "a262" , "a263" 
+  ,"a264" , "a279"  ,"a280" , "a281" , "a282"  ,"a294"  ,"a298"  ,"a307"  ,"a308"  ,"a316" , "a318" , "a320" , "a344" 
+  ,"a345" , "a346"  ,"a359" , "a360" , "a361"  ,"a362"  ,"a366"  ,"a367"  ,"a368"  ,"a369" , "a370" , "a372" , "a388" 
+  ,"a389" , "a393"  ,"a394" , "a395" , "a396"  ,"a397"  ,"a398"  ,"a400"  ,"a405"  ,"a406" , "a407" , "a411" , "a412" 
+  ,"a413" , "a414"  ,"a415" , "a416" , "a417"  ,"a418"  ,"a419"  ,"a430"  ,"a431"  ,"a440" , "a453" , "a460" , "a461" 
+  ,"a462" , "a463"  ,"a464" , "a465" , "a466"  ,"a482"  ,"a491"  ,"a492"  ,"a495"  ,"a496" , "a497" , "a498" , "a499" 
+  ,"a526" , "a527"  ,"a528" , "a529" , "a530"  ,"a534"  ,"a535"  ,"a536"  ,"a542"  ,"a543" , "a544" , "a547" , "a548" 
+  ,"a549" , "a550"  ,"a551" , "a552" , "a553"  ,"a554"  ,"a567"  ,"a569"  ,"a570"  ,"a579" , "a580" , "a584" , "a585" 
+  ,"a588" , "a589"  ,"a590" , "a591" , "a594"  ,"a597"  ,"a608"  ,"a609"  ,"a612"  ,"a615" , "a629" , "a630" , "a639" 
+  ,"a640" , "a641"  ,"a642" , "a643" , "a644"  ,"a652"  ,"a661"  ,"a662"  ,"a665"  ,"a666" , "a668" , "a669" , "a670" 
+  ,"a671" , "a672"  ,"a673" , "a674" , "a675"  ,"a677"  ,"a734"  ,"a735"  ,"a736"  ,"a737" , "a738" , "a739" , "a740" 
+  ,"a741" , "a742"  ,"a743" , "a744" , "a745"  ,"a746"  ,"a747"  ,"a748"  ,"a751"  ,"a752" , "a762" , "a769" , "a770" 
+  ,"a771" , "a779"  ,"a799" , "a800" , "a801"  ,"a807"  ,"a808"  ,"a827"  ,"a836"  ,"a837" , "a840" , "a841" , "a855" 
+  ,"a856" , "a857"  ,"a858" , "a859" , "a867"  ,"a868"  ,"a869"  ,"a870"  ,"a871"  ,"a872" , "a905" , "a906" , "a907" 
+  ,"a908" , "a909"  ,"a910" , "a911" , "a912"  ,"a913"  ,"a914"  ,"a918"  ,"a944"  ,"a945" , "a946" , "a947" , "a951" 
+  ,"a971" , "a999"  ,"a1000", "a1001", "a1002" ,"a1003" ,"a1004" ,"a1005" ,"a1006" ,"a1034", "a1035", "a1036", "a1037"
+  ,"a1038", "a1042" ,"a1043", "a1053", "a1066" ,"a1079" ,"a1080" ,"a1081" ,"a1123" ,"a1124", "a1126", "a1127", "a1128"
+  ,"a1132", "a1136" ,"a1137", "a1138", "a1159" ,"a1160" ,"a1167" ,"a1169" ,"a1170" ,"a1175", "a1176", "a1179", "a1187"
+  ,"a1188", "a1190" ,"a1196", "a1197", "a1198" ,"a1208" ,"a1209" ,"a1210" ,"a1211" ,"a1212", "a1214", "a1215", "a1216"
+  ,"a1217", "a1225" ,"a1226" , "a1227", "a1228" ,"a1229" ,"a1236" ,"a1237" ,"a1242" ,"a1243", "a1244", "a1245", "a1246"
+  ,"a1247", "a1256" ,"a1257", "a1259", "a1260" ,"a1271" ,"a1272" ,"a1273" ,"a1274" ,"a1275", "a1314", "a1315", "a1328"
+  ,"a1329", "a1330" ,"a1332", "a1344", "a1345" ,"a1346" ,"a1357" ,"a1358" ,"a1359" ,"a1360", "a1362", "a1363", "a1420"
+  ,"a1421", "a1457" ,"a1458", "a1472", "a1473" ,"a1474" ,"a1478" ,"a1479" ,"a1492" ,"a1493", "a1494", "a1496", "a1505"
+  ,"a1506", "a1507" ,"a1510", "a1511", "a1512" ,"a1521" ,"a1522" ,"a1527" ,"a1551" ,"a1552", "a1554", "a1555", "a1556"
+  ,"a1669", "a1670" ,"a1680", "a1681", "a1700" ,"a1701" ,"a1712" ,"a1715" ,"a1716" ,"a1717", "a1722", "a1723", "a1724"
+  ,"a1729", "a1730" ,"a1740", "a1741", "a1753" ,"a1754" ,"a1755" ,"a1756" ,"a1757" ,"a1778", "a1779", "a1780", "a1781"
+  ,"a1803", "a1806" ,"a1807", "a1858", "a1859" ,"a1860" ,"a1861" ,"a1863" ,"a1887" ,"a1888", "a1889", "a1892", "a1893"
+  ,"a1922", "a1923" ,"a1924", "a1948", "a1949" ,"a1952" ,"a1953" ,"a1959" ,"a1960" ,"a1961", "a1965", "a1966", "a1967"
+  ,"a2004", "a2005" ,"a2006", "a2007", "a2019" ,"a2020" ,"a2021" ,"a2029" ,"a2031" ,"a2041", "a2042", "a2043", "a2054"
+  ,"a2055", "a2090" ,"a2091", "a2092", "a2101" ,"a2102" ,"a2118" ,"a2134" ,"a2135" ,"a2136", "a2137", "a2138", "a2139"
+  ,"a2140", "a2141" ,"a2142", "a2149", "a2150" ,"a2151" ,"a2152" ,"a2162" ,"a2163" ,"a2164", "a2165", "a2166", "a2167"
+  ,"a2168", "a2193" ,"a2194", "a2195", "a2196" ,"a2233" ,"a2234" ,"a2235" ,"a2236" ,"a2237", "a2238", "a2239", "a2240"
+  ,"a2241", "a2242" ,"a2251", "a2252", "a2253" ,"a2301" ,"a2302" ,"a2303" ,"a2304" ,"a2305", "a2311", "a2312", "a2313"
+  ,"a2393", "a2403" ,"a2404", "a2405", "a2406" ,"a2407" ,"a2431" ,"a2432" ,"a2460" ,"a2462", "a2464", "a2465", "a2466"
+  ,"a2467", "a2468" ,"a2469", "a2484", "a2486" ,"a2487" ,"a2559" ,"a2568" ,"a2569" ,"a2578", "a2596", "a2597", "a2598"
+  ,"a2601", "a2602" ,"a2610", "a2611", "a2612" ,"a2613" ,"a2614" ,"a2615" ,"a2656" ,"a2711", "a2712", "a2713", "a2715"
+  ,"a2716", "a2722" ,"a2723", "a2725", "a2726" ,"a2727" ,"a2728" ,"a2729" ,"a2730" ,"a2731", "a2732", "a2735", "a2736"
+  ,"a2737", "a2738" ,"a2742", "a2746", "a2753" ,"a2754" ,"a2755" ,"a2756" ,"a2757" ,"a2758", "a2772", "a2778", "a2779"
+  ,"a2780", "a2781" ,"a2790", "a2791", "a2847" ,"a2848" ,"a2854" ,"a2855" ,"a2872" ,"a2873", "a2885", "a2909", "a2945"
+  ,"a2946", "a2947" ,"a2958", "a2960", "a2961" ,"a2962" ,"a2963" ,"a2964" ,"a2965" ,"a2970", "a2972", "a2973", "a2974"
+  ,"a2975", "a2976" ,"a2977", "a3023", "a3024" ,"a3027" ,"a3043" ,"a3044" ,"a3045" ,"a3121", "a3122", "a3147", "a3176"
+  ,"a3177", "a3178" ,"a3183", "a3184", "a3185" ,"a3186" ,"a3207" ,"a3208" ,"a3209" ,"a3210", "a3224", "a3225", "a3226"
+  ,"a3227", "a3238" ,"a3239", "a3240", "a3261" ,"a3262" ,"a3263" ,"a3264" ,"a3265" ,"a3274", "a3275", "a3276", "a3308"
+  ,"a3332", "a3333" ,"a3358", "a3359", "a3360" ,"a3363" ,"a3364" ,"a3365" ,"a3366" ,"a3367", "a3373", "a3374", "a3375"
+  ,"a3376", "a3377" ,"a3378", "a3409", "a3410" ,"a3411" ,"a3444" ,"a3445" ,"a3453" ,"a3454", "a3455", "a3463", "a3465"
+  ,"a3466", "a3475" ,"a3478", "a3479", "a3489" ,"a3495" ,"a3496" ,"a3520" ,"a3526" ,"a3527", "a3528", "a3530", "a3532"
+  ,"a3533", "a3539" ,"a3540", "a3541", "a3555" ,"a3576" ,"a3577" ,"a3578" ,"a3579" ,"a3580", "a3581", "a3582", "a3583"
+  ,"a3584", "a3597" ,"a3598", "a3599", "a3600" ,"a3601" ,"a3602" ,"a3616" ,"a3617" ,"a3636", "a3637", "a3638", "a3639"
+  ,"a3640", "a3641" ,"a3642", "a3643", "a3644" ,"a3648" ,"a3649" ,"a3650" ,"a3651" ,"a3726", "a3727", "a3728", "a3775"
+  ,"a3776", "a3777" ,"a3778", "a3779", "a3780" ,"a3781" ,"a3820" ,"a3821" ,"a3822" ,"a3824", "a3825", "a3826", "a3827"
+  ,"a3828", "a3842" ,"a3843", "a3846", "a3874" ,"a3875" ,"a3876" ,"a3877" ,"a3878" ,"a3879", "a3884", "a3885", "a3946"
+  ,"a3969", "a3970" ,"a3971", "a3991", "a3992" ,"a3993" ,"a3994" ,"a3997" ,"a3998" ,"a3999", "a4000", "a4004", "a4005"
+  ,"a4006", "a4007" ,"a4008", "a4034", "a4035" ,"a4036" ,"a4037" ,"a4047" ,"a4056" ,"a4057", "a4058", "a4059", "a4086"
+  ,"a4087", "a4098" ,"a4105", "a4106", "a4136" ,"a4157" ,"a4158" ,"a4159" ,"a4190" ,"a4191", "a4192", "a4193", "a4208"
+  ,"a4209", "a4210" ,"a4211", "a4246", "a4266" ,"a4267" ,"a4268" ,"a4269" ,"a4282" ,"a4322", "a4323", "a4324", "a4325"
+  ,"a4346", "a4347" ,"a4369", "a4370", "a4371" ,"a4379" ,"a4380" ,"a4381" ,"a4386" ,"a4387", "a4388", "a4401", "a4418"
+  ,"a4419", "a4455" ,"a4465", "a4480", "a4499" ,"a4500" ,"a4501" ,"a4502" ,"a4510" ,"a4511", "a4535", "a4553", "a4554"
+  ,"a4565", "a4566" ,"a4567", "a4568", "a4569" ,"a4570" ,"a4588" ,"a4589" ,"a4603" ,"a4657", "a4658", "a4659", "a4660"
+  ,"a4682", "a4683" ,"a4684", "a4685", "a4686" ,"a4687" ,"a4688" ,"a4719" ,"a4720" ,"a4721", "a4722", "a4751", "a4752"
+  ,"a4753", "a4754" ,"a4755", "a4756", "a4757" ,"a4786" ,"a4788" ,"a4809" ,"a4810" ,"a4847", "a4850", "a4851", "a4852"
+  ,"a4857", "a4858" ,"a4859", "a4860", "a4861" ,"a4922" ,"a4947" ,"a4948" ,"a4949" ,"a4975", "a4976", "a5011", "a5012"
+  ,"a5013", "a5014" ,"a5015", "a5016", "a5053" ,"a5054" ,"a5071" ,"a5072" ,"a5073" ,"a5077", "a5078", "a5174", "a5175"
+  ,"a5176", "a5204" ,"a5205", "a5206", "a5217" ,"a5270" ,"a5271" ,"a5299" ,"a5300" ,"a5302", "a5319", "a5321", "a5335"
+  ,"a5351", "a5370" ,"a5384", "a5385", "a5439" ,"a5440" ,"a5503" ,"a5504" ,"a5531" ,"a5532", "a5533", "a5534", "a5535"
+  ,"a5552", "a5553" ,"a5554", "a5560", "a5561" ,"a5562" ,"a5567" ,"a5568" ,"a5569" ,"a5572", "a5573", "a5574", "a5582"
+  ,"a5583", "a5584" ,"a5585", "a5586", "a5587" ,"a5603" ,"a5604" ,"a5662" ,"a5663" ,"a5664", "a5665", "a5671", "a5722"
+  ,"a5723", "a5724" ,"a5743", "a5744", "a5764" ,"a5766" ,"a5783" ,"a5824" ,"a5830" ,"a5890", "a5891", "a5892", "a5897"
+  ,"a5919", "a5920" ,"a5983", "a5985", "a5986" ,"a5998" ,"a6048" ,"a6058" ,"a6059" ,"a6061", "a6062", "a6091", "a6092"
+  ,"a6093", "a6102" ,"a6103", "a6139", "a6140" ,"a6141" ,"a6143" ,"a6144" ,"a6145" ,"a6146", "a6160", "a6171", "a6178"
+  ,"a6223", "a6224" ,"a6234", "a6239", "a6240" ,"a6263" ,"a6296" ,"a6297" ,"a6298" ,"a6299", "a6300", "a6329", "a6330"
+  ,"a6356", "a6403" ,"a6404", "a6405", "a6516" ,"a6523" ,"a6535" ,"a6536" ,"a6542" ,"a6543", "a6544", "a6545", "a6552"
+  ,"a6553", "a6569" ,"a6570", "a6577", "a6610" ,"a6611" ,"a6623" ,"a6635" ,"a6637" ,"a6638", "a6690", "a6700"
+))
+```
+
+```{r For loop to filter out group 1}
+
+#Isolate group 1
+amazon_louvain[1] -> al_1
+#n_distinct(al_1$`1`) to give us the length of the for loop
+
+#initialize our collection data
+temp2 <- character()
+
+#for each member of group 1
+for (i in 1:n_distinct(al_1$`1`)) {
+  
+  #Filter out the V1 values that match
+  dplyr::filter(amazon_el, V1 == al_1$`1`[i]) -> temp1
+  
+  #and combine with all other group 1 edges
+  temp2 <- bind_rows(temp2, temp1)
+  
+}
+
+str(temp2)
+```
+
+```{r Plot group 1}
+set.seed(42)
+
+#Take our group 1 edgelist and clean out any rows with NAs
+amazon_g1 <- na.omit(temp2)
+
+#Convert edgelist to igraph
+graph_from_data_frame(amazon_g1, directed = FALSE) -> g1_igraph
+
+#plot without labels, I made the nodes small and unlabeled so we can see the edges better
+plot(g1_igraph, vertex.label=NA, vertex.size = .5)
+
+```
+
+
+Looking at group 1, we can see what mostly appears to be a hairball. However, we can see what appears to be a further breakdown of approximately 4 large groups.
+
+```{r Lovain of g1}
+cluster_louvain(g1_igraph) -> g1_lovain
+g1_lovain
+```
+
+
+```{r Sub_group 2 edgelist}
+
+#Isolate sub-group 2
+g1_lovain[1] -> g1_s1
+#n_distinct(al_1$`1`) to give us the length of the for loop
+
+#initialize our collection data
+temp2 <- character()
+
+#for each member of group 1
+for (i in 1:n_distinct(g1_s1$`1`)) {
+  
+  #Filter out the V1 values that match
+  dplyr::filter(amazon_el, V1 == g1_s1$`1`[i]) -> temp1
+  
+  #and combine with all other group 1 edges
+  temp2 <- bind_rows(temp2, temp1)
+  
+}
+
+str(temp2)
+```
+
+```{r g1_s1 igraph}
+#transfer temp2 to new data.frame
+temp2 -> g1_s1_el
+
+#create igraph object
+graph_from_data_frame(g1_s1_el) -> g1_s1_igraph
+
+g1_s1_igraph
+```
+
+```{r}
+plot(g1_s1_igraph)
+```
+
+```{r}
+transitivity(g1_s1_igraph)
+
+g1_s1_igraph$eigen  <- centr_eigen(g1_s1_igraph)
+g1_s1_igraph$betw   <- centr_betw(g1_s1_igraph)
+
+plot(g1_s1_igraph, edge.size = 0.5, arrow.size = 0.5,
+     vertex.size = g1_s1_igraph$eigen$vector*20)
+
+plot(g1_s1_igraph, edge.size = 0.5, arrow.size = 0.5,
+     vertex.size = g1_s1_igraph$betw$res)
+```
+
+A transitivity of almost 0.5 shows that there is a definite tendency to fulfill the strong triadic closure property. This is to be expected, as this is relating products that are bought together.
+
+Looking at eigen vs betweeness, The nodes that catch the eye are: a1004 and a1007.
+
+Searching the meta text, we get:
+
+Id:   1004
+ASIN: 0531112004
+  title: How to Write a Term Paper (A Speak Out, Write on! Book)
+  group: Book
+  salesrank: 837629
+  similar: 0
+  categories: 1
+   |Books[283155]|Subjects[1000]|Children's Books[4]|Reference & Nonfiction[3176]|Language Arts[3182]|Composition & Creative Writing[3183]
+  reviews: total: 1  downloaded: 1  avg rating: 5
+    1999-8-22  cutomer:  ATVPDKIKX0DER  rating: 5  votes:  10  helpful:   2
+    
+
+
+Id:   1007
+ASIN: 0443071373
+  title: Clinical Pharmacy and Therapeutics
+  group: Book
+  salesrank: 706603
+  similar: 0
+  categories: 2
+   |Books[283155]|Subjects[1000]|Medicine[13996]|Pharmacology[14080]|Pharmacy[14088]
+   |Books[283155]|Subjects[1000]|Professional & Technical[173507]|Medical[173514]|Pharmacology[265544]|Pharmacy[265548]
+  reviews: total: 0  downloaded: 0  avg rating: 0
+
+
+Starting with 1007, we can see from the plots that it is surrounded by 1864 - 1868.
+
+Id:   1864
+ASIN: 069401057X
+  title: Zoom City (Growing Tree)
+  group: Book
+  salesrank: 66993
+  similar: 5  0694010588  0694010723  0694006513  1552090345  0694010391
+  categories: 6
+   |Books[283155]|Subjects[1000]|Children's Books[4]|Baby-3[2752]|Basic Concepts[2753]|General[2765]
+   |Books[283155]|Subjects[1000]|Children's Books[4]|Baby-3[2752]|Board Books[2778]
+   |Books[283155]|Subjects[1000]|Children's Books[4]|Authors & Illustrators, A-Z[170540]|( H )[170548]|Hurd, Thacher[170709]
+   |[540744]|Specialty Stores[547930]|Books, Music & More[559958]|Books for Babies[692218]|Board Books[692220]
+   |[540744]|Specialty Stores[547930]|Books, Music & More[559958]|Books for Babies[692218]|Concept Books[694936]|General[694944]
+   |Books[283155]|Subjects[1000]|Children's Books[4]|Baby-3[2752]|General[3049241]
+  reviews: total: 11  downloaded: 11  avg rating: 4
+    1998-9-30  cutomer:  ATVPDKIKX0DER  rating: 5  votes:   0  helpful:   0
+    1998-10-2  cutomer:  ATVPDKIKX0DER  rating: 5  votes:   1  helpful:   1
+    1999-7-31  cutomer:  ATVPDKIKX0DER  rating: 5  votes:   2  helpful:   2
+    2000-3-24  cutomer: A1RYHBX54KOLWD  rating: 5  votes:   1  helpful:   1
+    2000-10-23  cutomer: A3SMR4HRFJARSC  rating: 2  votes:   0  helpful:   0
+    2001-4-30  cutomer:  A87BV8TBFB0C5  rating: 5  votes:   4  helpful:   4
+    2001-8-2  cutomer:  AM9KJ9C2VLVK8  rating: 2  votes:   5  helpful:   3
+    2002-1-8  cutomer: A1OZ8X4ZK4SFFQ  rating: 2  votes:   5  helpful:   1
+    2003-6-22  cutomer: A3UOI3KH0BZK58  rating: 5  votes:   0  helpful:   0
+    2004-10-5  cutomer:  AOM91Q2SIB4ZN  rating: 5  votes:   0  helpful:   0
+    2005-1-6  cutomer: A389VZ934X0K9R  rating: 5  votes:   0  helpful:   0
+
+Id:   1865
+ASIN: 0486654605
+  title: Catalysis in Chemistry and Enzymology
+  group: Book
+  salesrank: 116258
+  similar: 5  0126437319  0716732688  0471359297  0471303097  0199638209
+  categories: 2
+   |Books[283155]|Subjects[1000]|Science[75]|Chemistry[13570]|Physical & Theoretical[13588]
+   |Books[283155]|Subjects[1000]|Professional & Technical[173507]|Professional Science[173510]|Chemistry[227282]|Physical & Theoretical[227289]
+  reviews: total: 1  downloaded: 1  avg rating: 5
+    2004-1-4  cutomer: A1DIZO95XRBLPO  rating: 5  votes:   1  helpful:   1
+
+Id:   1866
+ASIN: 0765801485
+  title: Media and Democracy in Africa
+  group: Book
+  salesrank: 1726823
+  similar: 0
+  categories: 6
+   |Books[283155]|Subjects[1000]|History[9]|Africa[4762]|General[4776]
+   |Books[283155]|Subjects[1000]|Nonfiction[53]|Government[10753]|Democracy[10761]
+   |Books[283155]|Subjects[1000]|Law[10777]|Perspectives on Law[173495]|Non-US Legal Systems[10955]
+   |Books[283155]|Subjects[1000]|Nonfiction[53]|Social Sciences[11232]|Special Groups[11298]|African-American Studies[11300]
+   |Books[283155]|Subjects[1000]|Professional & Technical[173507]|Law[173518]|Perspectives on Law[227505]|Non-US Legal Systems[227513]
+   |Books[283155]|Subjects[1000]|Nonfiction[53]|Social Sciences[11232]|Media Studies[13022421]
+  reviews: total: 0  downloaded: 0  avg rating: 0
+
+Id:   1867
+ASIN: B00007KIBN
+  title: Pacific Chants: Polynesian Himene
+  group: Music
+  salesrank: 53183
+  similar: 5  B000093FHF  B000004BQU  B000003EKA  B000003EK1  B00000412X
+  categories: 3
+   |Music[5174]|Styles[301668]|International[33]|General[63848]
+   |Music[5174]|Styles[301668]|New Age[36]|General[63957]
+   |Music[5174]|Specialty Stores[468040]|Indie Music[266023]|International[171245]|General[520182]
+  reviews: total: 1  downloaded: 1  avg rating: 5
+    2004-1-24  cutomer: A1O2IZYNEX8RW2  rating: 5  votes:   5  helpful:   5
+
+Id:   1868
+ASIN: 0965669408
+  title: 111 Days to Zion
+  group: Book
+  salesrank: 1200784
+  similar: 0
+  categories: 0
+  reviews: total: 0  downloaded: 0  avg rating: 0
+
+I can see why a book about pharmocology (1007) would be tied to a book on chemistry and enzymology (1865), but I'm unsure why it would end up tied to a children's book (1864), and two social/cultural texts (1866 and 1867). 1868 provides nothing but the title in this data, but a quick google search identifies it as a book about Mormon history.
+
+If I was pressed to make a profile of the person who would buy these items together, I would say a college student who is purchasing text books for both STEM and Liberal Arts courses, and has either a child or a much younger sibling and/or niece/nephew.
+
+Seeing a book on how to write a term paper in the same subgroup is not surprising, as it would fit with our image of a college student.
+
+```{r Blockmodel, eval=FALSE, include=FALSE}
+matrix(data = na.omit(g1_s1_el)) -> g1_s1_mat
+
+network(g1_s1_mat, matrix.type == "edgelist", directed = TRUE, bipartite = FALSE) -> g1_s1_net
+
+# Run equivalence cluster
+equiv.clust(g1_s1_igraph) %>% plot(.)
+
+#sna::blockmodel creates a blockmodel from  a graph and clutering object, set k = 4 based on equiv.clust results
+blockmodel(rdgam_net, equiv.clust(rdgam_net), k = 4) -> rdgam_block
+plot(rdgam_block)
+```
+Error in if (matrix.type == "edgelist") { : missing value where TRUE/FALSE needed
+
+I wanted to do some clustering and a blockmodel, but I couldn't convert the data into a network object, which is needed for those functions to work. I just kept getting the error message above.
+
+
+
+
+
+
+
+
