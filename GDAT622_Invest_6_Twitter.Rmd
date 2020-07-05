@@ -1,0 +1,280 @@
+---
+title: "GDAT622_Invest6_Twitter_James"
+author: "James Stanfield"
+date: "7/3/2020"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+{
+  c("alphahull",     # To calculate the convex hull
+    "ca",            # Correspondence analysis
+    "conflicted",    # To deal with conflicting function names
+    # I've had some strangeness with this
+    #  script. I suspect package:conflicted,
+    #  but I don't yet know for sure.
+    "data.table",    # Fast data input/output
+    "dplyr",         # This is all of tidyverse that gets used here
+    "dtplyr",        # dplyr syntax with a data.table backend
+    "here",          # To find/store files w/o setwd() and getwd()
+    "igraph",        # Basic network tools; we'll use statnet mostly
+    "igraphdata",    # Some useful datasets
+    "intergraph",    # Translate between igraph and statnet formats
+    "lmPerm",        # To do permutation tests
+    "statnet",       # A suite of network tools, including ERGM and more
+    "openxlsx",
+    "rtweet",       # access twitter api from inside Rstudio
+    "networkdata",
+    "farver"         # ggraph and graphlayouts
+  ) -> package_names
+  
+  for (package_name in package_names) {
+    if (!is.element(package_name, installed.packages()[, 1])) {
+      install.packages(package_name,
+                       repos = "http://cran.mtu.edu/")
+      # An alternate, just in case.
+      #                      repos="http://lib.stat.cmu.edu/R/CRAN")
+    }
+    library(
+      package_name,
+      character.only = TRUE,
+      quietly = TRUE,
+      verbose = FALSE
+    )
+  }
+  rm(list = c("package_name", "package_names"))
+}
+
+library(ggraph)
+library(graphlayouts)
+
+set_here()
+
+# Because I like these options:
+options(show.signif.stars = FALSE)
+options(digits = 4)
+```
+
+
+# Access the Twitter API from inside Rstudio
+
+Thankfully, I still had my old Twitter api setup saved on Github.
+I saved them into the new project folder and then removed them, as this is
+going into a public repository.
+
+```{r Save twitter access info as objects}
+#app.name <- "app name"
+#consumer.key <- "consumer key"
+#consumer.secret <- "consumer secret"
+```
+
+```{r store those access objects in the project folder}
+#saveRDS(app.name, file = "app_name.Rds")
+#saveRDS(consumer.key, file = "consumer_key.Rds")
+#saveRDS(consumer.secret, file = "consumer_secret.Rds")
+```
+
+```{r load access objects back in, eval=FALSE, include=FALSE}
+readRDS(file = "app_name.Rds") -> app.name
+readRDS(file = "consumer_key.Rds") -> consumer.key
+readRDS(file = "consumer_secret.Rds") -> consumer.secret
+
+```
+
+Now we can create and use our token.
+
+```{r Access token}
+#token <- create_token(app = app.name, consumer_key = consumer.key, consumer_secret = consumer.secret)
+```
+
+# Paradox Interactive
+
+Paradox Interactive is one of my favorite video game companies. Crusader Kings II, a game all about building and maintaining a medieval dynasty has earned many hours of my time. Funnily enough, success in the game comes from how well you build an internal network of servants and vassals and an external network of leiges and allies. If both are built well, few things will shake you. Build one well and the other poorly, and you will deal with seasonal trouble. Build both poorly, and you will not rule for long.
+
+Given this connection to our topic for this course, Paradox seemed like a fitting choice for this investigation.
+
+```{r Tweet History}
+#get history of tweets
+tl_pi <- get_timeline(c("PdxInteractive"), n = 400)
+
+# There are 900 columns, I'm only going to keep 2
+tl_pi %>%
+  select(., screen_name, reply_to_screen_name) %>% 
+  na.omit(.) %>%
+  distinct(.) -> tl_pi
+
+str(tl_pi)
+```
+
+Well, that looks just like an edglist made out of Paradox Interactive's reponses to tweets. Since these are responses, we can treat this as undirected, as each edge represents a tweet sent and reciprocated.
+
+Now if we plotted this, we would just get Paradox Interactive connected to a bunch of otherwise independent nodes.
+
+```{r Plot current data}
+graph_from_data_frame(tl_pi) -> test1_igraph
+plot(test1_igraph, vertex.label = NA)
+```
+
+Yep, just a tennis ball with Paradox in the middle.
+
+```{r get list of who PdxInteractive is following}
+get_friends("PdxInteractive")
+```
+
+
+```{r Make sure we can search for friends with user_id}
+get_friends("16370407")
+```
+
+```{r Create larger edgelist}
+#List who PdxInteractive follows
+get_friends("PdxInteractive") -> f1
+
+#Pick 3 of those user and list who they follow
+get_friends("16370407") -> f2
+get_friends("216368886") -> f3
+get_friends("1112988438343663616") -> f4
+
+#stack all the lists
+bind_rows(f1, f2, f3, f4) -> friend_list
+
+str(friend_list)
+```
+
+```{r Prune}
+#Remove anyone who doesn't appear at least twice in user_id
+newd <-  friend_list %>% group_by(user_id) %>% dplyr::filter(n()>1) %>% arrange(., user_id)
+newd
+```
+
+This leaves us with 33 edges, much more manageable
+
+```{r Plot network}
+graph_from_data_frame(newd) -> Pdx_igraph
+plot(Pdx_igraph)
+```
+
+```{r Who is user_id 1108028970564575233}
+lookup_users("1108028970564575233") -> u1
+u1$screen_name
+```
+
+Interesting, it looks like the twitter account for "Vampire the Masquerade: Bloodlines" connects to a lot of the same accounts as PAradox Interactive does.
+
+```{r Who is user_id 166080090}
+lookup_users("166080090") -> u2
+u2$screen_name
+```
+
+TheWesterFront happens to be "Executive Chairman of the Board at Paradox Interactive. Ventrue Clan." (Ventrue is a Vampire the Masquerade reference)
+
+```{r Who is user_id 16370407}
+lookup_users("16370407") -> u3
+u3$screen_name
+```
+
+Mattias Vahlne aka @MrValue is an "Internet professional in general, Internet Video, Strategy, procurement, bizdev, CRM, Marketing Automation."
+
+So someone who works professionally in the kinds of fields that would interest Paradox as a business.
+
+```{r}
+get_timeline(c("PdxInteractive"), n = 400)
+```
+
+Let's try a different approach.
+
+I'll make an edgelist by connecting everyone who appeared in the same tweet together, like a co-occurence.
+
+```{r Appeared in same tweet edgelist}
+# get history of tweets
+paradox_el <- get_timeline(c("PdxInteractive"), n = 400)
+
+# Let's grab our very 1st edgelist again
+paradox_el %>%
+  select(., screen_name, reply_to_screen_name) %>% 
+  na.omit(.) %>%
+  distinct(.) -> p_el1
+names(p_el1) <- c("V1", "V2")
+
+# Now we'll connect reply_to_screen_name to quoted_screen_name
+paradox_el %>%
+  select(., reply_to_screen_name, quoted_screen_name) %>% 
+  na.omit(.) %>%
+  distinct(.) -> p_el2
+names(p_el2) <- c("V1", "V2")
+
+# Now we'll connect quoted_screen_name to retweet_screen_name
+paradox_el %>%
+  select(., quoted_screen_name, retweet_screen_name) %>% 
+  na.omit(.) %>%
+  distinct(.) -> p_el3
+names(p_el3) <- c("V1", "V2")
+
+# Now we'll connect screen_name to retweet_screen_name
+paradox_el %>%
+  select(., screen_name, retweet_screen_name) %>% 
+  na.omit(.) %>%
+  distinct(.) -> p_el4
+names(p_el4) <- c("V1", "V2")
+
+# Now we'll connect reply_to_screen_name to retweet_screen_name
+paradox_el %>%
+  select(., reply_to_screen_name, retweet_screen_name) %>% 
+  na.omit(.) %>%
+  distinct(.) -> p_el5
+names(p_el5) <- c("V1", "V2")
+
+# Now we'll connect screen_name to quoted_screen_name
+paradox_el %>%
+  select(., screen_name, quoted_screen_name) %>% 
+  na.omit(.) %>%
+  distinct(.) -> p_el6
+names(p_el6) <- c("V1", "V2")
+
+#stack all the lists
+bind_rows(p_el1, p_el2, p_el3, p_el4, p_el5, p_el6) %>% distinct(.)-> co_el
+
+head(co_el)
+```
+
+Well, turns out that in the 400 tweets we pulled, there were no co-occurences
+
+At this point, I think I'm going to leave my network-building with just the one I made using friends.
+
+Using followers might have provided more value, but would have been much more time intensive. The value we did get, is insight into who Paradox wants to reach, or at least who the social media manager and his bosses wnat to reach.
+
+If I was Paradox, I would likely study who follows the accounts that I want to reach and see how I can best interact those communities.
+
+The importance of a follower vs a friend is that, in theory, a follower is already predisposed to hear what you have to say. By choosing to follow you, they have signed up to receive anything you post. Friends are those you chosen to follow, and you have much less built-in influence on them, if you have any at all.
+
+Retweets and hashtags are powerful as they involve jumping onto something that is already moving. If someone expresses something that you want to spread, retweeting it can expand the reach of the original author to your audience. In reverse, you hope that your followers will retweet your posts so that they spread to their followers and so on throughout the network.
+
+Hashtags posses the same power, allowing accounts to quickly call out a specific topic with a quick string, and spread that topic.
+
+The data that could be valuable in this kind of marketing is the buying habits of your target audience. Companies like Amazon and Google make a great deal of their money by selling customer data to interested parties.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
